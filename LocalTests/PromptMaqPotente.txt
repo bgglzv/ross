@@ -1,0 +1,152 @@
+CONTEXTO
+========
+
+Este é o repositório ROSS (rotordinâmica), fork pessoal em bgglzv/ross,
+branch `feature-motor`. Estamos desenvolvendo e validando um motor de
+indução trifásico (MotorElement) simulando o MIT M-C-5283001 do compressor
+de gás de reciclo da REPLAN (datasheet I-FD-5270.00-52313-712-BI4-102),
+sob três formas de acionamento: fonte AC direta (partida direta / DOL),
+inversor V/F (escalar, malha aberta) e inversor FOC (vetorial, malha
+fechada).
+
+Todo o trabalho descrito abaixo está na pasta `LocalTests/` (fora do
+controle de versão da branch principal — ver seção "Sobre o Git" no
+final). Ela foi transportada para esta máquina via uma branch dedicada
+chamada `local-tests-sync` (não confundir com `feature-motor`, que é a
+branch "oficial" usada para PRs).
+
+ARQUIVOS RELEVANTES (todos em LocalTests/)
+===========================================
+
+- `MIT_RePlan.py` — script original: simula o motor acionado por fonte AC
+  direta (partida direta), 20 s de simulação, carga nominal aplicada em
+  t = 10 s. Gera 14 gráficos (tempo/frequência) em `figs/`. JÁ VALIDADO —
+  roda sem erros e os resultados batem com o datasheet (corrente,
+  velocidade e conjugado nominal dentro de ~1% dos valores de placa).
+
+- `mit_replan_common.py` — módulo compartilhado: função `pu_to_ohm()`,
+  parâmetros do motor (extraídos do datasheet), parâmetros de simulação
+  (TF=20s, DT=1e-3, TIME_STEP=1e-4, T_LOAD=10s), e os parâmetros do
+  inversor (FREQUENCY_S, TIME_RAMP). Usado pelos dois scripts comparativos
+  abaixo para garantir que usem exatamente os mesmos parâmetros.
+
+- `mit_replan_plots.py` — módulo compartilhado de plotagem: funções
+  `compare_time()` e `compare_frequency()` que sobrepõem, num único
+  gráfico Plotly, a mesma grandeza física (conjugado, velocidade, corrente
+  de fase A, tensão de linha AB) para vários cenários de acionamento
+  (uma curva por cenário). Usa `ross.motors.utils.windowed_dfft` para a
+  FFT, garantindo consistência com os métodos `plot_*(domain="frequency")`
+  nativos do pacote.
+
+- `MIT_RePlan_Comparativo1.py` — compara, à velocidade/frequência nominal
+  (60 Hz), os três acionamentos (DOL, V/F, FOC) com carga nominal aplicada
+  em t=10s. Gera 7 gráficos comparativos (3 no tempo: conjugados,
+  velocidade, corrente fase A; 4 na frequência: conjugados, velocidade,
+  corrente fase A, tensão de linha AB) em `figs_comparativo_1/`.
+
+- `MIT_RePlan_Comparativo2.py` — mesma coisa, mas só V/F e FOC (não tem
+  cenário DOL, pois a fonte AC ideal não aceita referência de frequência
+  reduzida), com frequência de referência de 30 Hz (50% da nominal).
+  Gera os mesmos 7 gráficos em `figs_comparativo_2/`.
+
+TAREFA PENDENTE — RODAR E VALIDAR OS COMPARATIVOS
+==================================================
+
+Os dois scripts comparativos (`MIT_RePlan_Comparativo1.py` e
+`MIT_RePlan_Comparativo2.py`) ainda NÃO foram validados até o fim nesta
+máquina (mais fraca) — o processamento foi interrompido antes de terminar
+porque o usuário ia trocar para esta máquina mais potente. A correção
+mais recente JÁ ESTÁ APLICADA no código, mas precisa ser confirmada.
+
+Comandos para rodar (a partir de LocalTests/):
+
+    python MIT_RePlan_Comparativo1.py
+    python MIT_RePlan_Comparativo2.py
+
+O QUE VERIFICAR: depois de cada execução, abra
+`figs_comparativo_1/01_conjugados_tempo.png` e
+`figs_comparativo_2/01_conjugados_tempo.png` e confirme que:
+
+  - As curvas de conjugado eletromagnético de TODOS os cenários (AC, V/F,
+    FOC) convergem de forma limpa para perto do conjugado nominal
+    (~13 192 N·m, linha tracejada "Load Torque (reference)") depois que a
+    carga é aplicada em t=10s.
+  - NÃO deve haver oscilação crescente, ruído grosseiro ou picos muito
+    acima do nominal (ex.: dezenas ou centenas de milhares de N·m) nos
+    cenários V/F ou FOC. Um pequeno overshoot transitório logo após a
+    entrada de carga é esperado e aceitável; divergência sustentada não é.
+
+SE OS GRÁFICOS AINDA MOSTRAREM INSTABILIDADE (contexto do bug já
+investigado, para não repetir o trabalho):
+-------------------------------------------------------------------
+
+Já identificamos e corrigimos DUAS causas de instabilidade numérica
+durante o desenvolvimento:
+
+1. Usar o mesmo `TIME_STEP=1e-4` (do acionamento DOL, sem chaveamento)
+   como passo interno dos cenários V/F/FOC sub-amostra a modulação SVPWM
+   (poucas amostras por período de chaveamento Ts=1/FREQUENCY_S) e causa
+   o conjugado a oscilar sem convergir. CORRIGIDO: os dois scripts agora
+   NÃO passam `time_step` explícito para `run_with_inverter_vf()` /
+   `run_with_inverter_foc()`, deixando cada método usar seu próprio
+   default interno (Ts/200), que é a resolução que a própria biblioteca
+   considera adequada.
+
+2. `frequency_s` não é só a frequência de chaveamento — no `InverterFOC`
+   ela também define, pelo método de bandwidth, os ganhos de TODAS as
+   malhas de controle em cascata (`BWp_iqs = BWp_ids = BWi_ids =
+   frequency_s/8`, `BWp_w = BWi_ids/8`, `BWi_w = BWp_w/8`). Baixar
+   `frequency_s` "só para melhorar a amostragem numérica" desafina o
+   controle: testamos 500 Hz e a malha de velocidade ficou com banda
+   passante ~1 Hz, lenta demais para amortecer a resposta desta máquina
+   de alta inércia (57,5 kg·m²), e o conjugado divergiu para mais de
+   1 000 000 N·m. CORRIGIDO: `FREQUENCY_S` está fixo em 2000 Hz em
+   `mit_replan_common.py` (dá larguras de banda razoáveis para este
+   motor) — não reduza esse valor para tentar resolver algum problema de
+   amostragem; se precisar de mais resolução numérica, ajuste apenas o
+   `time_step` (ou continue deixando `None`/default).
+
+Se AINDA assim houver instabilidade residual nos gráficos, o próximo
+passo de investigação seria olhar a corrente de fase A no tempo
+(`03_corrente_fase_a_tempo.png`) para ver se a instabilidade aparece
+primeiro elétrica ou mecanicamente, e considerar se `TIME_RAMP=5.0s` (a
+rampa de aceleração até a referência) precisa ser mais suave.
+
+DESEMPENHO ESPERADO
+====================
+
+O cenário FOC usa `_run_motor_time_loop_closed`, que NÃO é compilado via
+numba (é Python puro, pois chama de volta para o objeto `InverterFOC` a
+cada passo). Com a resolução Ts/200 a 2000 Hz (passo interno ≈ 2,5e-6 s),
+uma simulação de 20 s tem ~8.000.000 de passos. Nesta máquina mais fraca,
+uma simulação FOC de 20 s a um passo 4x mais grosseiro (1e-5 s, 2 milhões
+de passos) levou ~382 segundos (~6,4 min); a resolução completa Ts/200
+(4x mais fina) deve levar bem mais que isso — a expectativa era de
+~25-30 min por cenário FOC nesta máquina. Nesta máquina mais potente
+deve ser mais rápido, mas ainda espere que o FOC seja o gargalo (rode em
+background/aguarde, não interrompa achando que travou).
+
+Os cenários DOL e V/F usam `_run_motor_time_loop_open`, compilado via
+numba (`@njit`), e devem rodar em segundos mesmo em 8 milhões de passos.
+
+SOBRE O GIT
+============
+
+A pasta `LocalTests/` é ignorada pelo `.gitignore` na branch principal
+(`feature-motor` e `main`) — ela nunca deve ir para PRs enviados a
+jguarato/upstream. Ela chegou nesta máquina através da branch separada
+`local-tests-sync` (só existe no fork bgglzv/ross, nunca é mesclada em
+`feature-motor` nem faz parte de nenhum PR). Se você fizer mudanças aqui
+dentro e quiser levá-las de volta/sincronizar com outra máquina, comite e
+dê push nessa mesma branch (`local-tests-sync`), não em `feature-motor`.
+
+Comandos de referência (rodar no que já é o clone existente, embora aqui
+estejamos só documentando — pergunte ao usuário antes de fazer commits ou
+pushes você mesmo):
+
+    git checkout local-tests-sync
+    git pull origin local-tests-sync
+    # ... trabalhar em LocalTests/ ...
+    git add -f LocalTests/<arquivos alterados>
+    git commit -m "..."
+    git push origin local-tests-sync
