@@ -18,6 +18,38 @@ from plotly import graph_objects as go
 from ross.motors.utils import windowed_dfft
 
 
+# Traços no domínio do tempo vêm na resolução interna do integrador (ex.:
+# Ts/200 do FOC, ~2,5e-6 s), o que produz milhões de pontos por cenário e
+# estoura tanto o tamanho do HTML quanto o motor de exportação de PNG
+# (Kaleido). Decimamos por min/max binning antes de plotar (preserva picos
+# transitórios, ao contrário de um stride simples que poderia pular por
+# cima de um spike estreito) — não afeta os resultados da simulação, só a
+# resolução visual do gráfico.
+MAX_TIME_POINTS = 20_000
+
+
+def _decimate(x, y):
+    n_bins = MAX_TIME_POINTS // 2
+    if len(x) <= 2 * n_bins:
+        return x, y
+
+    bin_size = len(x) // n_bins
+    n_trimmed = n_bins * bin_size
+    y_bins = y[:n_trimmed].reshape(n_bins, bin_size)
+
+    argmin = np.argmin(y_bins, axis=1)
+    argmax = np.argmax(y_bins, axis=1)
+    rows = np.arange(n_bins)
+    lo, hi = np.minimum(argmin, argmax), np.maximum(argmin, argmax)
+
+    idx = np.empty(2 * n_bins, dtype=np.intp)
+    idx[0::2] = rows * bin_size + lo
+    idx[1::2] = rows * bin_size + hi
+    idx.sort()
+
+    return x[:n_trimmed][idx], y[:n_trimmed][idx]
+
+
 # =============================================================================
 # Extratores de grandeza — cada um recebe um MotorResponseResults e devolve
 # o sinal correspondente, já na unidade de interesse.
@@ -84,20 +116,22 @@ def compare_time(results_by_scenario, get_signal, title, yaxis_title,
     fig = go.Figure()
 
     for scenario_name, results in results_by_scenario.items():
+        x, y = _decimate(results.t, get_signal(results))
         fig.add_trace(
             go.Scatter(
-                x=results.t,
-                y=get_signal(results),
+                x=x,
+                y=y,
                 name=scenario_name,
             )
         )
 
     if reference_signal is not None:
         first_results = next(iter(results_by_scenario.values()))
+        x, y = _decimate(first_results.t, reference_signal(first_results))
         fig.add_trace(
             go.Scatter(
-                x=first_results.t,
-                y=reference_signal(first_results),
+                x=x,
+                y=y,
                 name=reference_name,
                 line=dict(dash="dash", color="black"),
             )

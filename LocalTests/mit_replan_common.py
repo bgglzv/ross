@@ -91,10 +91,10 @@ X2_PU = 0.105
 XM_PU = 3.363
 
 # --- Parâmetros de simulação (idênticos em todos os scripts MIT_RePlan_*) ---
-TF        = 20.0   # s   — tempo total
+TF        = 24.0   # s   — tempo total
 DT        = 1e-3   # s   — passo de avaliação
 TIME_STEP = 1e-4   # s   — passo interno do integrador (todos os acionamentos)
-T_LOAD    = 10.0   # s   — instante de aplicação da carga nominal
+T_LOAD    = 16.0   # s   — instante de aplicação da carga nominal
 
 # --- Parâmetros específicos dos inversores (InverterVF / InverterFOC) ---
 #
@@ -116,8 +116,8 @@ T_LOAD    = 10.0   # s   — instante de aplicação da carga nominal
 # numérica observada com passos maiores.
 FREQUENCY_S = Q_(2000.0, "Hz")
 
-TIME_RAMP = 5.0   # s — rampa de aceleração até a referência,
-                   # concluída bem antes de T_LOAD = 10 s
+TIME_RAMP = 8.0   # s — rampa de aceleração até a referência,
+                   # concluída bem antes de T_LOAD = 16 s
 
 
 def build_motor(tag="M-C-5283001"):

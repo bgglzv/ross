@@ -148,10 +148,10 @@ X2_PU = 0.105
 XM_PU = 3.363
 
 # --- Parâmetros de simulação ---
-TF        = 20.0   # s   — tempo total
+TF        = 24.0   # s   — tempo total
 DT        = 1e-3   # s   — passo de avaliação
 TIME_STEP = 1e-4   # s   — passo interno do integrador RK4
-T_LOAD    = 10.0   # s   — instante de aplicação da carga nominal
+T_LOAD    = 16.0   # s   — instante de aplicação da carga nominal
 
 
 # =============================================================================

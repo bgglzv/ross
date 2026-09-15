@@ -339,8 +339,17 @@ class InverterVF(Inverter):
         # Reference peak voltage
         Vp = self.speed_control(frequency)
 
-        # Reference voltages
-        theta = theta_0 + frequency * t
+        # Reference voltages. The flux angle is the time integral of the
+        # instantaneous frequency, not frequency * t: while the frequency is
+        # still ramping (linearly from zero), that integral is frequency *
+        # t / 2 (the ramp's average value over [0, t] times t); once the
+        # ramp completes and frequency is held constant, it continues at
+        # frequency * (t - time_ramp / 2), which is continuous with the
+        # ramp-phase expression at t = time_ramp.
+        if t <= self.time_ramp:
+            theta = theta_0 + frequency * t / 2
+        else:
+            theta = theta_0 + frequency * (t - self.time_ramp / 2)
         va_ref = Vp * np.sin(theta)
         vb_ref = Vp * np.sin(theta - 2 * np.pi / 3)
         vc_ref = Vp * np.sin(theta + 2 * np.pi / 3)

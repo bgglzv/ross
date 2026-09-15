@@ -1,0 +1,181 @@
+ESTUDO — MERGULHO DE VELOCIDADE DO INVERSOR FOC SOB CARGA NOMINAL
+==================================================================
+
+Data: 2026-09-14
+Motor: MIT M-C-5283001 (REPLAN, compressor de gás de reciclo — 2474 kW /
+       4000 V / 60 Hz / 4 polos / Jp_motor = 57,5 kg.m²)
+Script: LocalTests/MIT_RePlan_Comparativo1.py (cenário "FOC Inverter",
+        velocidade nominal — 60 Hz)
+Parâmetros relevantes: rampa de partida concluída em t = 8 s, carga
+        nominal aplicada em t = 16 s, TF = 24 s, FREQUENCY_S = 2000 Hz
+
+
+PERGUNTA
+========
+
+No gráfico de velocidade do cenário FOC (Comparativo 1), observa-se um
+mergulho transitório acentuado por volta de t ≈ 20 s — cerca de 4 s após
+a entrada da carga nominal em t = 16 s — no qual a velocidade do rotor
+cai de ~1800 RPM (síncrona) até um mínimo de aproximadamente 655 RPM,
+antes de se recuperar e reconvergir para ~1791 RPM (velocidade nominal
+de placa) por volta de t ≈ 21,5-22 s.
+
+É necessário investigar e determinar a causa-raiz desse mergulho:
+
+  a) trata-se de um erro de implementação — fórmula incorreta,
+     inconsistência de unidades, sinal trocado ou qualquer outra falha
+     de lógica de programação no controlador FOC (`InverterFOC`,
+     ross/motors/inverters.py); ou
+
+  b) trata-se de uma característica legítima da dinâmica de controle em
+     malha fechada para esta combinação específica de parâmetros
+     (inércia muito elevada, frequência de chaveamento escolhida,
+     degrau de carga de 100% aplicado logo após a partida) — ou seja,
+     um comportamento que, em maior ou menor grau, também ocorreria num
+     acionamento real com este mesmo ajuste de ganhos.
+
+A investigação deve se apoiar na relação entre conjugado eletromagnético
+(Te), corrente de estator e velocidade do rotor ao longo do evento, não
+apenas na forma da curva de velocidade isoladamente.
+
+
+RESPOSTA
+========
+
+Conclusão: NÃO é um erro de código — é uma característica real de malha
+de controle subamortecida para esta máquina específica.
+
+1. Consistência física (descarta bug numérico)
+   -----------------------------------------------
+   Os dados em resolução fina (passo interno ~2,5 µs) na janela do
+   evento (t ≈ 19,85-20,35 s) mostram:
+
+   - A velocidade cai e sobe de forma suave e monotônica (1403 -> 655
+     -> 988 RPM), sem saltos, sem NaN, sem descontinuidade — compatível
+     com a integração contínua dw/dt = Te/J.
+   - O conjugado eletromagnético acompanha exatamente o esperado:
+     fortemente negativo (~-19.000 N.m) enquanto a velocidade ainda cai
+     rápido, cruza zero exatamente no instante de velocidade mínima
+     (t ≈ 20,01 s, onde dw/dt = 0), e torna-se fortemente positivo
+     enquanto o controlador reacelera o rotor.
+
+   Torque e aceleração permanecem fisicamente coerentes durante todo o
+   evento — não há equação quebrada nem sinal invertido.
+
+2. Causa raiz do mergulho
+   -----------------------
+   - A partir de t = 16 s (entrada de carga), conjugado e corrente já
+     passam a oscilar com amplitude grande (Te entre -6 mil e +19 mil
+     N.m; corrente até ±780 A) mesmo com a velocidade ainda próxima da
+     nominal — assinatura típica de malha subamortecida, não de uma
+     rejeição limpa de distúrbio.
+   - Essa oscilação cresce em amplitude até que, por volta de t = 20 s,
+     atinge magnitude suficiente para produzir o mergulho visível de
+     velocidade. Depois disso, o sistema volta a amortecer e converge
+     (~1791 RPM por t ≈ 21,5-22 s) — ou seja, é um transitório mal
+     amortecido, mas estável, não uma divergência.
+   - No pico do evento, a corrente real de fase chega a ~1900 A —
+     aproximadamente 4,5x a corrente nominal (422,7 A) — e ultrapassa
+     largamente o limite que o próprio controlador pretende impor
+     (iqs_max = 3 x Is_nom ~= 1269 A; ver inverters.py, linha 685). Isso
+     ocorre porque esse limite recorta apenas a REFERÊNCIA de corrente
+     no referencial síncrono (dq) — não existe nenhuma limitação
+     instantânea sobre a corrente de fase real resultante da dinâmica
+     de fluxo. É uma lacuna real de projeto do controlador (falta de
+     proteção de sobrecorrente instantânea), não um erro de fórmula.
+
+3. Por que os testes oficiais não detectaram isso
+   -----------------------------------------------
+   O teste que valida o FOC sob carga
+   (test_foc_speed_tracks_nominal_reference_despite_load, em
+   ross/tests/test_motor_element.py) usa um motor de bancada com
+   Ip_motor = 0,0372 kg.m². A M-C-5283001 tem Ip_motor = 57,5 kg.m² —
+   cerca de 1,5 milhão de vezes maior. Os ganhos do controlador escalam
+   com a inércia pelo método de bandwidth (kp_w, ki_w proporcionais a
+   J), mas o limite de corrente (iqs_max) não escala com nada — está
+   atrelado somente à corrente nominal elétrica da máquina. A robustez
+   dessa malha para motores de grande porte, como o M-C-5283001, nunca
+   foi de fato exercitada pela suíte de testes oficial.
+
+4. Isso é compatível com o que aconteceria na prática?
+   -----------------------------------------------------
+   Parcialmente. Um inversor real, com este mesmo ajuste de ganhos e
+   frequência de chaveamento (2000 Hz — bem abaixo dos 5000 Hz usados
+   no teste oficial), submetido a um degrau de 100% de carga numa
+   máquina desta inércia, plausivelmente exibiria uma resposta
+   subamortecida semelhante (overshoot/undershoot pronunciado, tempo de
+   acomodação longo). Porém, um drive real possui proteção de
+   sobrecorrente instantânea em hardware, que provavelmente atuaria
+   (desarme/trip) antes de a corrente atingir 4,5x a nominal. Ou seja:
+   na prática, esta situação provavelmente resultaria numa falha do
+   acionamento, não numa recuperação suave como a simulação mostra — a
+   simulação é, neste ponto, mais otimista/idealizada do que o hardware
+   real permitiria.
+
+
+PROPOSIÇÕES PARA LIDAR COM A SITUAÇÃO
+======================================
+
+Nenhuma das opções abaixo foi implementada — são alternativas de projeto
+para avaliação e decisão.
+
+1. Aumentar FREQUENCY_S (frequência de chaveamento)
+   --------------------------------------------------
+   Os ganhos das malhas em cascata (BWp_iqs, BWp_ids, BWi_ids, BWp_w,
+   BWi_w) são todos derivados de FREQUENCY_S por divisões sucessivas
+   por 8 (ver inverters.py, InverterFOC.__init__). Usar uma frequência
+   de chaveamento maior — como os 5000 Hz já validados pelo teste
+   oficial, em vez dos 2000 Hz usados no LocalTests — eleva
+   proporcionalmente a banda passante de todas as malhas, tornando a
+   rejeição de distúrbio mais rápida. Contrapartida: já foi documentado
+   neste projeto que baixar demais FREQUENCY_S desafina o controle
+   (testou-se 500 Hz e o conjugado divergiu para mais de 1.000.000 N.m);
+   o efeito na direção oposta (aumentar) deve ser reavaliado
+   experimentalmente para este motor específico, verificando também o
+   custo computacional adicional (passo interno da simulação é
+   Ts/200 = 1/(200 x FREQUENCY_S)).
+
+2. Reajustar as razões fixas de bandwidth (/8/8/8) independentemente da
+   frequência de chaveamento
+   ------------------------------------------------------------------
+   Atualmente as três malhas (corrente, e dentro dela velocidade, numa
+   cascata) têm suas larguras de banda amarradas entre si por uma razão
+   fixa de 1/8 a cada nível. Essa razão foi herdada do método de
+   bandwidth genérico, não foi otimizada especificamente para a
+   combinação de parâmetros do M-C-5283001 (inércia muito alta e
+   relação Xm/X1 do circuito equivalente). Desacoplar essas razões (por
+   exemplo, permitir configurar BWp_w e BWi_w de forma independente da
+   frequência de chaveamento) permitiria um ajuste fino que priorize
+   amortecimento da malha de velocidade sem exigir aumentar
+   FREQUENCY_S como um todo.
+
+3. Suavizar a entrada de carga (rampa de carga em vez de degrau
+   instantâneo)
+   -----------------------------------------------------------------
+   O parâmetro load_torque_ratio é aplicado como degrau instantâneo em
+   load_torque_entrance_time. Um compressor de gás real, acoplado por
+   eixo/engrenagem, dificilmente vê 100% da carga nominal aplicada de
+   forma instantânea — normalmente há alguma rampa de carregamento
+   associada à dinâmica do processo (abertura de válvulas, aumento de
+   pressão de sucção/descarga etc.). Simular a entrada de carga como
+   uma rampa curta (em vez de um degrau) tornaria o cenário mais
+   representativo da operação real e provavelmente reduziria ou
+   eliminaria o mergulho, sem exigir nenhuma mudança no controlador em
+   si. Requer decidir/estimar um tempo de rampa de carga realista para
+   este compressor específico (não documentado neste estudo).
+
+4. Adicionar limitação de corrente instantânea (proteção de
+   sobrecorrente) ao modelo do FOC
+   -----------------------------------------------------------------
+   Hoje o único limite de corrente implementado (iqs_max = 3 x Is_nom,
+   inverters.py linha 685) recorta apenas a referência de corrente no
+   referencial síncrono (dq), não a corrente de fase real resultante da
+   dinâmica de fluxo — por isso a corrente real pôde ultrapassar esse
+   limite em ~50% durante o evento. Implementar uma limitação
+   instantânea sobre a corrente de fase sintetizada (ou sobre a
+   magnitude do vetor de corrente estimado a cada passo), similar ao
+   que um drive real faz via proteção de hardware, tornaria a simulação
+   mais fiel ao comportamento real do equipamento — e permitiria
+   observar se, com essa proteção ativa, o acionamento efetivamente
+   trip(a) nesse cenário ou apenas satura o torque disponível sem
+   desarmar.
