@@ -212,7 +212,7 @@ def build_docx():
             ["Inércia do rotor", f"{replan.JP_MOTOR:.1f} kg·m²", f"{tpim.IP_MOTOR:.4f} kg·m²"],
             ["Frequência de chaveamento", "5000 Hz", "5000 Hz"],
             ["Ensaio 1 — condição", "60 Hz, carga em t = 16 s", "60 Hz, carga em t = 1,5 s"],
-            ["Ensaio 2 — condição", "não executado", "30 Hz (50%), carga em t = 1,5 s"],
+            ["Ensaio 2 — condição", "30 Hz (50%), carga em t = 16 s", "30 Hz (50%), carga em t = 1,5 s"],
         ],
     )
     p = doc.add_paragraph(
@@ -232,21 +232,48 @@ def build_docx():
         if _exists(p):
             doc.add_picture(p, width=Cm(15))
 
-    df = _read_metrics(TPIM_DIR_1)
-    if df is not None:
-        _add_table(doc, METRICS_HEADERS, _metrics_rows(df))
+    tpim_e1_df = _read_metrics(TPIM_DIR_1)
+    if tpim_e1_df is not None:
+        _add_table(doc, METRICS_HEADERS, _metrics_rows(tpim_e1_df))
+
+    tpim_zoom = doc.add_paragraph(
+        f"Detalhe em torno do instante de aplicação da carga "
+        f"({tpim.ZOOM_BEFORE_S:g} s antes a {tpim.ZOOM_AFTER_S:g} s depois):"
+    )
+    tpim_zoom.runs[0].font.size = Pt(9)
+    tpim_zoom.runs[0].font.italic = True
+    tpim_zoom.runs[0].font.color.rgb = MUTED
+    tpim_zoom.runs[0].font.name = "Arial"
+    for name in ("01_conjugados_tempo_zoom.png", "02_velocidade_tempo_zoom.png"):
+        p = os.path.join(TPIM_DIR_1, name)
+        if _exists(p):
+            doc.add_picture(p, width=Cm(15))
 
     doc.add_paragraph()
     doc.add_paragraph("Motor industrial de grande porte — partida direta, V/F e FOC:")
     replan_e1_done = _exists(os.path.join(REPLAN_DIR_1, "01_conjugados_tempo.png"))
+    replan_e1_df = None
     if replan_e1_done:
         for name in ("01_conjugados_tempo.png", "02_velocidade_tempo.png"):
             p = os.path.join(REPLAN_DIR_1, name)
             if _exists(p):
                 doc.add_picture(p, width=Cm(15))
-        df = _read_metrics(REPLAN_DIR_1)
-        if df is not None:
-            _add_table(doc, METRICS_HEADERS, _metrics_rows(df))
+        replan_e1_df = _read_metrics(REPLAN_DIR_1)
+        if replan_e1_df is not None:
+            _add_table(doc, METRICS_HEADERS, _metrics_rows(replan_e1_df))
+
+        replan_zoom = doc.add_paragraph(
+            f"Detalhe em torno do instante de aplicação da carga "
+            f"({replan.ZOOM_BEFORE_S:g} s antes a {replan.ZOOM_AFTER_S:g} s depois):"
+        )
+        replan_zoom.runs[0].font.size = Pt(9)
+        replan_zoom.runs[0].font.italic = True
+        replan_zoom.runs[0].font.color.rgb = MUTED
+        replan_zoom.runs[0].font.name = "Arial"
+        for name in ("01_conjugados_tempo_zoom.png", "02_velocidade_tempo_zoom.png"):
+            p = os.path.join(REPLAN_DIR_1, name)
+            if _exists(p):
+                doc.add_picture(p, width=Cm(15))
     else:
         note = doc.add_paragraph(
             "Resultados do motor industrial de grande porte em finalização — "
@@ -269,21 +296,48 @@ def build_docx():
         if _exists(p):
             doc.add_picture(p, width=Cm(15))
 
-    df2 = _read_metrics(TPIM_DIR_2)
-    if df2 is not None:
-        _add_table(doc, METRICS_HEADERS, _metrics_rows(df2))
+    tpim_e2_df = _read_metrics(TPIM_DIR_2)
+    if tpim_e2_df is not None:
+        _add_table(doc, METRICS_HEADERS, _metrics_rows(tpim_e2_df))
+
+    tpim_zoom2 = doc.add_paragraph(
+        f"Detalhe em torno do instante de aplicação da carga "
+        f"({tpim.ZOOM_BEFORE_S:g} s antes a {tpim.ZOOM_AFTER_S:g} s depois):"
+    )
+    tpim_zoom2.runs[0].font.size = Pt(9)
+    tpim_zoom2.runs[0].font.italic = True
+    tpim_zoom2.runs[0].font.color.rgb = MUTED
+    tpim_zoom2.runs[0].font.name = "Arial"
+    for name in ("01_conjugados_tempo_zoom.png", "02_velocidade_tempo_zoom.png"):
+        p = os.path.join(TPIM_DIR_2, name)
+        if _exists(p):
+            doc.add_picture(p, width=Cm(15))
 
     doc.add_paragraph()
     doc.add_paragraph("Motor industrial de grande porte — V/F e FOC:")
     replan_e2_done = _exists(os.path.join(REPLAN_DIR_2, "01_conjugados_tempo.png"))
+    replan_e2_df = None
     if replan_e2_done:
         for name in ("01_conjugados_tempo.png", "02_velocidade_tempo.png"):
             p = os.path.join(REPLAN_DIR_2, name)
             if _exists(p):
                 doc.add_picture(p, width=Cm(15))
-        df2r = _read_metrics(REPLAN_DIR_2)
-        if df2r is not None:
-            _add_table(doc, METRICS_HEADERS, _metrics_rows(df2r))
+        replan_e2_df = _read_metrics(REPLAN_DIR_2)
+        if replan_e2_df is not None:
+            _add_table(doc, METRICS_HEADERS, _metrics_rows(replan_e2_df))
+
+        replan_zoom2 = doc.add_paragraph(
+            f"Detalhe em torno do instante de aplicação da carga "
+            f"({replan.ZOOM_BEFORE_S:g} s antes a {replan.ZOOM_AFTER_S:g} s depois):"
+        )
+        replan_zoom2.runs[0].font.size = Pt(9)
+        replan_zoom2.runs[0].font.italic = True
+        replan_zoom2.runs[0].font.color.rgb = MUTED
+        replan_zoom2.runs[0].font.name = "Arial"
+        for name in ("01_conjugados_tempo_zoom.png", "02_velocidade_tempo_zoom.png"):
+            p = os.path.join(REPLAN_DIR_2, name)
+            if _exists(p):
+                doc.add_picture(p, width=Cm(15))
     else:
         note = doc.add_paragraph(
             "Resultados do motor industrial de grande porte em finalização — "
@@ -295,9 +349,9 @@ def build_docx():
 
     # --- 06 Síntese ---
     _add_section_heading(doc, "06", "Síntese e conclusão")
-    if df2 is not None:
-        vf_row = df2[(df2["Ensaio"].str.contains("Velocidade")) & (df2["Cenário"] == "Inversor V/F")].iloc[0]
-        foc_row = df2[(df2["Ensaio"].str.contains("Velocidade")) & (df2["Cenário"] == "Inversor FOC")].iloc[0]
+    if tpim_e2_df is not None:
+        vf_row = tpim_e2_df[(tpim_e2_df["Ensaio"].str.contains("Velocidade")) & (tpim_e2_df["Cenário"] == "Inversor V/F")].iloc[0]
+        foc_row = tpim_e2_df[(tpim_e2_df["Ensaio"].str.contains("Velocidade")) & (tpim_e2_df["Cenário"] == "Inversor FOC")].iloc[0]
         doc.add_paragraph(
             f"No motor de pequeno porte, a 50% da velocidade nominal, o erro "
             f"de regime permanente de velocidade após o degrau de carga foi "
@@ -309,17 +363,43 @@ def build_docx():
             f"proporcionalmente conforme a frequência de referência diminui, "
             f"um comportamento já conhecido dos acionamentos escalares."
         )
+    if replan_e1_df is not None and replan_e2_df is not None:
+        doc.add_paragraph(
+            "No motor industrial de grande porte, o quadro é mais "
+            "heterogêneo. No Ensaio 2 (30 Hz), o FOC repete o padrão do "
+            "motor pequeno: acomoda o conjugado bem mais rápido que o V/F "
+            "(0,02 s contra 0,50 s) e praticamente anula o erro de regime "
+            "de velocidade. Já no Ensaio 1 (60 Hz, velocidade nominal), o "
+            "FOC — com a mesma sintonia calculada automaticamente pelo "
+            "método de banda passante, sem qualquer ajuste manual — leva "
+            "bem mais tempo para acomodar tanto o conjugado quanto a "
+            "velocidade (cerca de 5,2 s, contra frações de segundo no "
+            "V/F) e apresenta sobressinal acentuado. O erro de regime de "
+            "velocidade ainda é menor no FOC (0,70 rad/s) que no V/F "
+            "(0,91 rad/s), mas a resposta transitória nessa condição "
+            "específica é claramente pior — um resultado que sugere que "
+            "a sintonia automática, adequada para esse motor a 30 Hz, não "
+            "se transporta bem para a condição de carga nominal a 60 Hz."
+        )
     doc.add_paragraph(
-        "Conclusão geral: o controle FOC entrega tempos de acomodação de "
-        "torque iguais ou menores que o V/F e, principalmente, corrige o "
-        "desvio de velocidade sob carga que o V/F não corrige — vantagem "
-        "que se acentua em baixas frequências de referência. Esse "
-        "comportamento já é esperado pela teoria de acionamentos de "
-        "corrente alternada e foi reproduzido de forma consistente nos "
-        "dois motores testados, de portes muito diferentes."
+        "Conclusão geral: o controle FOC corrige o desvio de velocidade "
+        "sob carga de forma consistente em todos os motores e condições "
+        "testados — a vantagem clássica da malha fechada sobre o V/F em "
+        "malha aberta. Já o tempo de acomodação não é uniformemente "
+        "melhor: no motor pequeno e no motor grande a 30 Hz o FOC acomoda "
+        "mais rápido que o V/F, mas no motor grande à velocidade nominal "
+        "(60 Hz) o FOC acomoda bem mais devagar, com sobressinal elevado, "
+        "usando a mesma sintonia automática sem qualquer ajuste manual. "
+        "Isso indica que a robustez da sintonia calculada pelo método de "
+        "banda passante não pode ser presumida em todas as condições de "
+        "operação — o desempenho dinâmico deve ser verificado caso a "
+        "caso, especialmente em motores de maior inércia."
     )
     doc.add_paragraph(
-        "Como próximo passo, sugere-se repetir a mesma análise em um par de "
+        "Como próximos passos, sugere-se (i) revisar manualmente a "
+        "sintonia do FOC no motor de grande porte na condição de carga "
+        "nominal a 60 Hz, onde a resposta transitória se mostrou bem mais "
+        "lenta que a do V/F, e (ii) repetir a mesma análise em um par de "
         "motores de porte semelhante, caso o objetivo seja subsidiar uma "
         "decisão real de substituição de equipamento."
     )
@@ -345,7 +425,12 @@ def build_docx():
     out_path = os.path.join(REPORTS_DIR, "Relatorio_Robustez_Sintonia_PI.docx")
     doc.save(out_path)
     print(f"[OK] {out_path}")
-    return df, df2
+    return {
+        "tpim_e1": tpim_e1_df,
+        "tpim_e2": tpim_e2_df,
+        "replan_e1": replan_e1_df,
+        "replan_e2": replan_e2_df,
+    }
 
 
 # =============================================================================
@@ -424,7 +509,44 @@ def _add_pptx_table(slide, left, top, width, height, headers, rows):
     return table
 
 
-def build_pptx(tpim_e1_df, tpim_e2_df):
+def _add_test_slide(prs, number, title, img_dir, img_names, df, x_left=PptxCm(0.7), x_right=PptxCm(14.1)):
+    """Slide padrão de ensaio: até duas imagens lado a lado, com tabela de
+    métricas abaixo (se `df` for informado)."""
+    slide = _blank_slide(prs)
+    _accent_bar(slide, prs)
+    _slide_title(slide, number, title, prs)
+    positions = (x_left, x_right)
+    for name, left in zip(img_names, positions):
+        path = os.path.join(img_dir, name)
+        if _exists(path):
+            slide.shapes.add_picture(path, left, PptxCm(2.2), width=PptxCm(13.2))
+    if df is not None:
+        rows = _metrics_rows(df)
+        _add_pptx_table(slide, PptxCm(0.7), PptxCm(10.2), PptxCm(26.6), PptxCm(4.8), METRICS_HEADERS, rows)
+    return slide
+
+
+def _add_zoom_slide(prs, number, title, img_dir, img_names, x_left=PptxCm(0.7), x_right=PptxCm(14.1)):
+    """Slide de zoom na entrada da carga: até duas imagens lado a lado, sem tabela."""
+    slide = _blank_slide(prs)
+    _accent_bar(slide, prs)
+    _slide_title(slide, number, title, prs)
+    positions = (x_left, x_right)
+    for name, left in zip(img_names, positions):
+        path = os.path.join(img_dir, name)
+        if _exists(path):
+            slide.shapes.add_picture(path, left, PptxCm(2.2), width=PptxCm(13.2))
+    return slide
+
+
+def build_pptx(metrics):
+    tpim_e1_df = metrics["tpim_e1"]
+    tpim_e2_df = metrics["tpim_e2"]
+    replan_e1_df = metrics["replan_e1"]
+    replan_e2_df = metrics["replan_e2"]
+    replan_e1_done = _exists(os.path.join(REPLAN_DIR_1, "01_conjugados_tempo.png"))
+    replan_e2_done = _exists(os.path.join(REPLAN_DIR_2, "01_conjugados_tempo.png"))
+
     prs = Presentation()
     prs.slide_width = PptxCm(28.0)
     prs.slide_height = PptxCm(15.75)
@@ -443,44 +565,79 @@ def build_pptx(tpim_e1_df, tpim_e2_df):
     if _exists(DIAGRAM):
         s1.shapes.add_picture(DIAGRAM, PptxCm(1), PptxCm(4.6), width=PptxCm(26))
 
-    # --- Slide 2: Ensaio 1 ---
-    s2 = _blank_slide(prs)
-    _accent_bar(s2, prs)
-    _slide_title(s2, "02", "Ensaio 1 — Degrau de Carga (60 Hz)", prs)
-    img1 = os.path.join(TPIM_DIR_1, "01_conjugados_tempo.png")
-    img2 = os.path.join(TPIM_DIR_1, "02_velocidade_tempo.png")
-    if _exists(img1):
-        s2.shapes.add_picture(img1, PptxCm(0.7), PptxCm(2.2), width=PptxCm(13.2))
-    if _exists(img2):
-        s2.shapes.add_picture(img2, PptxCm(14.1), PptxCm(2.2), width=PptxCm(13.2))
-    if tpim_e1_df is not None:
-        rows = _metrics_rows(tpim_e1_df)
-        _add_pptx_table(s2, PptxCm(0.7), PptxCm(10.2), PptxCm(26.6), PptxCm(4.8), METRICS_HEADERS, rows)
+    n = 1
 
-    # --- Slide 3: Ensaio 2 ---
-    s3 = _blank_slide(prs)
-    _accent_bar(s3, prs)
-    _slide_title(s3, "03", "Ensaio 2 — Degrau de Carga a 50% da Velocidade (30 Hz)", prs)
-    img3 = os.path.join(TPIM_DIR_2, "01_conjugados_tempo.png")
-    img4 = os.path.join(TPIM_DIR_2, "02_velocidade_tempo.png")
-    if _exists(img3):
-        s3.shapes.add_picture(img3, PptxCm(0.7), PptxCm(2.2), width=PptxCm(13.2))
-    if _exists(img4):
-        s3.shapes.add_picture(img4, PptxCm(14.1), PptxCm(2.2), width=PptxCm(13.2))
-    if tpim_e2_df is not None:
-        rows = _metrics_rows(tpim_e2_df)
-        _add_pptx_table(s3, PptxCm(0.7), PptxCm(10.2), PptxCm(26.6), PptxCm(4.8), METRICS_HEADERS, rows)
+    def next_number():
+        nonlocal n
+        n += 1
+        return f"{n:02d}"
 
-    # --- Slide 4: síntese ---
+    # --- Ensaio 1 — motor de pequeno porte ---
+    _add_test_slide(
+        prs, next_number(), "Ensaio 1 — Motor de Pequeno Porte — Degrau de Carga (60 Hz)",
+        TPIM_DIR_1, ("01_conjugados_tempo.png", "02_velocidade_tempo.png"), tpim_e1_df,
+    )
+    _add_zoom_slide(
+        prs, next_number(),
+        f"Ensaio 1 — Motor de Pequeno Porte — Zoom na Entrada da Carga "
+        f"({tpim.ZOOM_BEFORE_S:g} s antes / {tpim.ZOOM_AFTER_S:g} s depois)",
+        TPIM_DIR_1, ("01_conjugados_tempo_zoom.png", "02_velocidade_tempo_zoom.png"),
+    )
+
+    # --- Ensaio 1 — motor de grande porte ---
+    if replan_e1_done:
+        _add_test_slide(
+            prs, next_number(), "Ensaio 1 — Motor de Grande Porte — Degrau de Carga (60 Hz)",
+            REPLAN_DIR_1, ("01_conjugados_tempo.png", "02_velocidade_tempo.png"), replan_e1_df,
+        )
+        _add_zoom_slide(
+            prs, next_number(),
+            f"Ensaio 1 — Motor de Grande Porte — Zoom na Entrada da Carga "
+            f"({replan.ZOOM_BEFORE_S:g} s antes / {replan.ZOOM_AFTER_S:g} s depois)",
+            REPLAN_DIR_1, ("01_conjugados_tempo_zoom.png", "02_velocidade_tempo_zoom.png"),
+        )
+
+    # --- Ensaio 2 — motor de pequeno porte ---
+    _add_test_slide(
+        prs, next_number(),
+        "Ensaio 2 — Motor de Pequeno Porte — Degrau de Carga a 50% da Velocidade (30 Hz)",
+        TPIM_DIR_2, ("01_conjugados_tempo.png", "02_velocidade_tempo.png"), tpim_e2_df,
+    )
+    _add_zoom_slide(
+        prs, next_number(),
+        f"Ensaio 2 — Motor de Pequeno Porte — Zoom na Entrada da Carga "
+        f"({tpim.ZOOM_BEFORE_S:g} s antes / {tpim.ZOOM_AFTER_S:g} s depois)",
+        TPIM_DIR_2, ("01_conjugados_tempo_zoom.png", "02_velocidade_tempo_zoom.png"),
+    )
+
+    # --- Ensaio 2 — motor de grande porte ---
+    if replan_e2_done:
+        _add_test_slide(
+            prs, next_number(),
+            "Ensaio 2 — Motor de Grande Porte — Degrau de Carga a 50% da Velocidade (30 Hz)",
+            REPLAN_DIR_2, ("01_conjugados_tempo.png", "02_velocidade_tempo.png"), replan_e2_df,
+        )
+        _add_zoom_slide(
+            prs, next_number(),
+            f"Ensaio 2 — Motor de Grande Porte — Zoom na Entrada da Carga "
+            f"({replan.ZOOM_BEFORE_S:g} s antes / {replan.ZOOM_AFTER_S:g} s depois)",
+            REPLAN_DIR_2, ("01_conjugados_tempo_zoom.png", "02_velocidade_tempo_zoom.png"),
+        )
+
+    # --- síntese ---
     s4 = _blank_slide(prs)
     _accent_bar(s4, prs)
-    _slide_title(s4, "04", "Veredito de Robustez e Próximos Passos", prs)
+    _slide_title(s4, next_number(), "Veredito de Robustez e Próximos Passos", prs)
     bullets = [
-        "O FOC iguala ou supera o V/F em tempo de acomodação do torque nos "
-        "dois motores testados.",
         "O FOC praticamente elimina o desvio de velocidade sob carga (erro "
-        "de regime próximo de zero); o V/F apresenta desvio permanente por "
-        "escorregamento.",
+        "de regime próximo de zero) em todos os motores e condições "
+        "testados; o V/F apresenta desvio permanente por escorregamento.",
+        "No motor pequeno e no motor grande a 30 Hz, o FOC também acomoda "
+        "o conjugado bem mais rápido que o V/F.",
+        "No motor grande à velocidade nominal (60 Hz), porém, o FOC "
+        "acomoda bem mais devagar que o V/F (~5,2 s contra frações de "
+        "segundo) e com sobressinal elevado — a sintonia automática que "
+        "funciona bem a 30 Hz não se sustenta nessa condição.",
         "O desvio do V/F cresce proporcionalmente quando a referência de "
         "frequência cai (visto a 30 Hz, 50% da velocidade nominal) — "
         "comportamento esperado dos acionamentos escalares em malha "
@@ -488,8 +645,9 @@ def build_pptx(tpim_e1_df, tpim_e2_df):
         "Nenhum ganho de controlador foi copiado entre motores ou "
         "cenários: cada acionamento usa sua própria sintonia calculada "
         "automaticamente.",
-        "Próximo passo: repetir a análise com um par de motores de porte "
-        "semelhante, caso o objetivo seja subsidiar uma decisão real de "
+        "Próximos passos: revisar manualmente a sintonia do FOC no motor "
+        "grande à velocidade nominal, e repetir a análise com um par de "
+        "motores de porte semelhante para subsidiar uma decisão real de "
         "substituição de equipamento.",
     ]
     box = s4.shapes.add_textbox(PptxCm(1), PptxCm(2.4), prs.slide_width - PptxCm(2), PptxCm(11))
@@ -511,5 +669,5 @@ def build_pptx(tpim_e1_df, tpim_e2_df):
 
 
 if __name__ == "__main__":
-    tpim_e1_df, tpim_e2_df = build_docx()
-    build_pptx(tpim_e1_df, tpim_e2_df)
+    metrics = build_docx()
+    build_pptx(metrics)

@@ -96,6 +96,10 @@ DT        = 1e-3   # s   — passo de avaliação
 TIME_STEP = 1e-4   # s   — passo interno do integrador (todos os acionamentos)
 T_LOAD    = 16.0   # s   — instante de aplicação da carga nominal
 
+# --- Janela de zoom (gráficos no tempo) em torno de T_LOAD ---
+ZOOM_BEFORE_S = 0.5   # s — antes da entrada da carga
+ZOOM_AFTER_S  = 1.0   # s — depois da entrada da carga
+
 # --- Parâmetros específicos dos inversores (InverterVF / InverterFOC) ---
 #
 # FREQUENCY_S não é só a frequência de chaveamento SVPWM: no InverterFOC ela

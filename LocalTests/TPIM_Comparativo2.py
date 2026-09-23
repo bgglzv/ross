@@ -12,6 +12,12 @@ Domínio do tempo
     2. Velocidade do rotor
     3. Corrente de estator — fase A
 
+Domínio do tempo — zoom na entrada da carga
+---------------------------------------------
+Mesmas três grandezas acima, recortadas à janela [T_LOAD - ZOOM_BEFORE_S,
+T_LOAD + ZOOM_AFTER_S] (ver ``tpim_1p5hp_example.py``), com os eixos X e Y
+ajustados aos dados visíveis nessa janela.
+
 Domínio da frequência
 ----------------------
     4. Conjugados (eletromagnético)
@@ -114,6 +120,40 @@ fig = plots.compare_time(
 plots.save_figure(fig, OUTPUT_DIR, "03_corrente_fase_a_tempo")
 
 # ------------------------------------------------------------------
+# Domínio do tempo — zoom na entrada da carga
+# ------------------------------------------------------------------
+zoom_xlim = (common.T_LOAD - common.ZOOM_BEFORE_S, common.T_LOAD + common.ZOOM_AFTER_S)
+
+fig = plots.compare_time(
+    results_by_scenario,
+    plots.get_electric_torque,
+    title="TPIM 1.5hp — Comparativo 2 — Conjugados (zoom na entrada da carga)",
+    yaxis_title="Torque (N·m)",
+    reference_signal=plots.get_load_torque,
+    reference_name="Torque de carga (referência)",
+    xlim=zoom_xlim,
+)
+plots.save_figure(fig, OUTPUT_DIR, "01_conjugados_tempo_zoom")
+
+fig = plots.compare_time(
+    results_by_scenario,
+    plots.get_speed_rpm,
+    title="TPIM 1.5hp — Comparativo 2 — Velocidade (zoom na entrada da carga)",
+    yaxis_title="Velocidade (RPM)",
+    xlim=zoom_xlim,
+)
+plots.save_figure(fig, OUTPUT_DIR, "02_velocidade_tempo_zoom")
+
+fig = plots.compare_time(
+    results_by_scenario,
+    plots.get_current_a,
+    title="TPIM 1.5hp — Comparativo 2 — Corrente de Fase A (zoom na entrada da carga)",
+    yaxis_title="Corrente (A)",
+    xlim=zoom_xlim,
+)
+plots.save_figure(fig, OUTPUT_DIR, "03_corrente_fase_a_tempo_zoom")
+
+# ------------------------------------------------------------------
 # Domínio da frequência
 # ------------------------------------------------------------------
 fig = plots.compare_frequency(
@@ -148,7 +188,7 @@ fig = plots.compare_frequency(
 )
 plots.save_figure(fig, OUTPUT_DIR, "07_tensao_linha_ab_freq")
 
-print(f"\n7 gráficos comparativos (14 arquivos: 7 HTML + 7 PNG) gravados em '{OUTPUT_DIR}/'.")
+print(f"\n10 gráficos comparativos (20 arquivos: 10 HTML + 10 PNG) gravados em '{OUTPUT_DIR}/'.")
 
 
 # =============================================================================

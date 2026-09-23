@@ -52,6 +52,10 @@ DT = 1e-3            # s — passo de avaliação (ver run() em motor_element.py
                      #     a saída real fica na resolução de time_step, não em DT)
 T_LOAD = 1.5         # s — instante de aplicação da carga nominal
 
+# --- Janela de zoom (gráficos no tempo) em torno de T_LOAD ---
+ZOOM_BEFORE_S = 0.1   # s — antes da entrada da carga
+ZOOM_AFTER_S  = 0.2   # s — depois da entrada da carga
+
 
 def build_motor(tag="TPIM_1p5hp"):
     """Instancia o `MotorElement` de 1.5 hp usado em

@@ -86,8 +86,14 @@ def get_line_voltage_ab(results):
 # =============================================================================
 
 
+def _window(x, y, xlim):
+    """Recorta `(x, y)` para o intervalo fechado `xlim = (x_min, x_max)`."""
+    mask = (x >= xlim[0]) & (x <= xlim[1])
+    return x[mask], y[mask]
+
+
 def compare_time(results_by_scenario, get_signal, title, yaxis_title,
-                  reference_signal=None, reference_name=None):
+                  reference_signal=None, reference_name=None, xlim=None):
     """Sobrepõe, no domínio do tempo, o mesmo sinal para vários cenários.
 
     Parameters
@@ -108,15 +114,25 @@ def compare_time(results_by_scenario, get_signal, title, yaxis_title,
     reference_name : str, optional
         Nome do traço de referência. Obrigatório se ``reference_signal``
         for informado.
+    xlim : tuple[float, float], optional
+        Se informado, recorta todos os traços a este intervalo de tempo
+        antes de decimar e trava os eixos X e Y a essa janela (zoom real,
+        com a escala vertical ajustada aos dados visíveis — não apenas um
+        recorte visual sobre a figura inteira).
 
     Returns
     -------
     plotly.graph_objects.Figure
     """
     fig = go.Figure()
+    windowed_y = []
 
     for scenario_name, results in results_by_scenario.items():
-        x, y = _decimate(results.t, get_signal(results))
+        t, y = results.t, get_signal(results)
+        if xlim is not None:
+            t, y = _window(t, y, xlim)
+        x, y = _decimate(t, y)
+        windowed_y.append(y)
         fig.add_trace(
             go.Scatter(
                 x=x,
@@ -127,7 +143,11 @@ def compare_time(results_by_scenario, get_signal, title, yaxis_title,
 
     if reference_signal is not None:
         first_results = next(iter(results_by_scenario.values()))
-        x, y = _decimate(first_results.t, reference_signal(first_results))
+        t, y = first_results.t, reference_signal(first_results)
+        if xlim is not None:
+            t, y = _window(t, y, xlim)
+        x, y = _decimate(t, y)
+        windowed_y.append(y)
         fig.add_trace(
             go.Scatter(
                 x=x,
@@ -142,6 +162,13 @@ def compare_time(results_by_scenario, get_signal, title, yaxis_title,
         xaxis_title="Tempo (s)",
         yaxis_title=yaxis_title,
     )
+
+    if xlim is not None:
+        fig.update_xaxes(range=list(xlim))
+        y_all = np.concatenate(windowed_y) if windowed_y else np.array([0.0])
+        y_min, y_max = float(np.min(y_all)), float(np.max(y_all))
+        pad = 0.05 * (y_max - y_min) if y_max > y_min else 1.0
+        fig.update_yaxes(range=[y_min - pad, y_max + pad])
 
     return fig
 
@@ -179,6 +206,7 @@ def compare_frequency(results_by_scenario, get_signal, title, yaxis_title,
     for scenario_name, results in results_by_scenario.items():
         dt = results.t[1] - results.t[0]
         freq, mag = windowed_dfft(get_signal(results), dt)
+        freq, mag = _decimate(freq, mag)
         fig.add_trace(
             go.Scatter(
                 x=freq,

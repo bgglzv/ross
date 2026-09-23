@@ -21,6 +21,7 @@ caso (ex.: `pi_robustness_case_study.py`, `TPIM_Comparativo1.py`).
 
 import numpy as np
 import pandas as pd
+from scipy.ndimage import uniform_filter1d
 
 # =============================================================================
 # Métricas de resposta ao degrau (seção "07 — Métricas" do protocolo)
@@ -49,7 +50,16 @@ DEFAULT_BAND = 0.10
 
 
 def _smooth(t, y, smooth_time=DEFAULT_SMOOTH_TIME):
-    """Filtro de média móvel (janela em tempo, não em amostras)."""
+    """Filtro de média móvel (janela em tempo, não em amostras).
+
+    Usa ``uniform_filter1d`` (soma corrente, custo O(N)) em vez de
+    ``np.convolve`` (convolução direta, custo O(N*window)): em sinais de
+    alta resolução (passo interno na casa de 1e-7 s, ex. FOC a 10 kHz) a
+    janela de 50 ms chega a ~1e5 amostras, e a convolução direta contra um
+    sinal de dezenas de milhões de pontos se torna impraticável (horas por
+    chamada). Mesmo resultado (média móvel com borda replicada), ordens de
+    magnitude mais rápido.
+    """
     if smooth_time <= 0:
         return y
 
@@ -58,11 +68,7 @@ def _smooth(t, y, smooth_time=DEFAULT_SMOOTH_TIME):
     if window <= 1:
         return y
 
-    kernel = np.ones(window) / window
-    pad_left = window // 2
-    pad_right = window - 1 - pad_left
-    y_padded = np.pad(y, (pad_left, pad_right), mode="edge")
-    return np.convolve(y_padded, kernel, mode="valid")
+    return uniform_filter1d(y, size=window, mode="nearest")
 
 
 def settling_time(t, y, y_final, band=DEFAULT_BAND, t_start=0.0, smooth_time=DEFAULT_SMOOTH_TIME):

@@ -23,6 +23,12 @@ Domínio do tempo
     2. Velocidade do rotor
     3. Corrente de estator — fase A
 
+Domínio do tempo — zoom na entrada da carga
+---------------------------------------------
+Mesmas três grandezas acima, recortadas à janela [T_LOAD - ZOOM_BEFORE_S,
+T_LOAD + ZOOM_AFTER_S] (ver ``mit_replan_common.py``), com os eixos X e Y
+ajustados aos dados visíveis nessa janela.
+
 Domínio da frequência
 ----------------------
     4. Conjugados (eletromagnético)
@@ -107,7 +113,7 @@ print(f"\nGerando gráficos comparativos em '{OUTPUT_DIR}/'...")
 fig = plots.compare_time(
     results_by_scenario,
     plots.get_electric_torque,
-    title="Comparativo 1 — Conjugados (velocidade nominal)",
+    title="Motor de Grande Porte — Comparativo 1 — Conjugados (velocidade nominal)",
     yaxis_title="Torque (N·m)",
     reference_signal=plots.get_load_torque,
     reference_name="Torque de carga (referência)",
@@ -117,7 +123,7 @@ plots.save_figure(fig, OUTPUT_DIR, "01_conjugados_tempo")
 fig = plots.compare_time(
     results_by_scenario,
     plots.get_speed_rpm,
-    title="Comparativo 1 — Velocidade (velocidade nominal)",
+    title="Motor de Grande Porte — Comparativo 1 — Velocidade (velocidade nominal)",
     yaxis_title="Velocidade (RPM)",
 )
 plots.save_figure(fig, OUTPUT_DIR, "02_velocidade_tempo")
@@ -125,10 +131,44 @@ plots.save_figure(fig, OUTPUT_DIR, "02_velocidade_tempo")
 fig = plots.compare_time(
     results_by_scenario,
     plots.get_current_a,
-    title="Comparativo 1 — Corrente de Fase A (velocidade nominal)",
+    title="Motor de Grande Porte — Comparativo 1 — Corrente de Fase A (velocidade nominal)",
     yaxis_title="Corrente (A)",
 )
 plots.save_figure(fig, OUTPUT_DIR, "03_corrente_fase_a_tempo")
+
+# ------------------------------------------------------------------
+# Domínio do tempo — zoom na entrada da carga
+# ------------------------------------------------------------------
+zoom_xlim = (common.T_LOAD - common.ZOOM_BEFORE_S, common.T_LOAD + common.ZOOM_AFTER_S)
+
+fig = plots.compare_time(
+    results_by_scenario,
+    plots.get_electric_torque,
+    title="Motor de Grande Porte — Comparativo 1 — Conjugados (zoom na entrada da carga)",
+    yaxis_title="Torque (N·m)",
+    reference_signal=plots.get_load_torque,
+    reference_name="Torque de carga (referência)",
+    xlim=zoom_xlim,
+)
+plots.save_figure(fig, OUTPUT_DIR, "01_conjugados_tempo_zoom")
+
+fig = plots.compare_time(
+    results_by_scenario,
+    plots.get_speed_rpm,
+    title="Motor de Grande Porte — Comparativo 1 — Velocidade (zoom na entrada da carga)",
+    yaxis_title="Velocidade (RPM)",
+    xlim=zoom_xlim,
+)
+plots.save_figure(fig, OUTPUT_DIR, "02_velocidade_tempo_zoom")
+
+fig = plots.compare_time(
+    results_by_scenario,
+    plots.get_current_a,
+    title="Motor de Grande Porte — Comparativo 1 — Corrente de Fase A (zoom na entrada da carga)",
+    yaxis_title="Corrente (A)",
+    xlim=zoom_xlim,
+)
+plots.save_figure(fig, OUTPUT_DIR, "03_corrente_fase_a_tempo_zoom")
 
 # ------------------------------------------------------------------
 # Domínio da frequência
@@ -136,7 +176,7 @@ plots.save_figure(fig, OUTPUT_DIR, "03_corrente_fase_a_tempo")
 fig = plots.compare_frequency(
     results_by_scenario,
     plots.get_electric_torque,
-    title="Comparativo 1 — Conjugados (FFT, velocidade nominal)",
+    title="Motor de Grande Porte — Comparativo 1 — Conjugados (FFT, velocidade nominal)",
     yaxis_title="Magnitude do torque (N·m)",
 )
 plots.save_figure(fig, OUTPUT_DIR, "04_conjugados_freq")
@@ -144,7 +184,7 @@ plots.save_figure(fig, OUTPUT_DIR, "04_conjugados_freq")
 fig = plots.compare_frequency(
     results_by_scenario,
     plots.get_speed_rpm,
-    title="Comparativo 1 — Velocidade (FFT, velocidade nominal)",
+    title="Motor de Grande Porte — Comparativo 1 — Velocidade (FFT, velocidade nominal)",
     yaxis_title="Magnitude da velocidade (RPM)",
 )
 plots.save_figure(fig, OUTPUT_DIR, "05_velocidade_freq")
@@ -152,7 +192,7 @@ plots.save_figure(fig, OUTPUT_DIR, "05_velocidade_freq")
 fig = plots.compare_frequency(
     results_by_scenario,
     plots.get_current_a,
-    title="Comparativo 1 — Corrente de Fase A (FFT, velocidade nominal)",
+    title="Motor de Grande Porte — Comparativo 1 — Corrente de Fase A (FFT, velocidade nominal)",
     yaxis_title="Magnitude da corrente (A)",
 )
 plots.save_figure(fig, OUTPUT_DIR, "06_corrente_fase_a_freq")
@@ -160,12 +200,12 @@ plots.save_figure(fig, OUTPUT_DIR, "06_corrente_fase_a_freq")
 fig = plots.compare_frequency(
     results_by_scenario,
     plots.get_line_voltage_ab,
-    title="Comparativo 1 — Tensão de Linha AB (FFT, velocidade nominal)",
+    title="Motor de Grande Porte — Comparativo 1 — Tensão de Linha AB (FFT, velocidade nominal)",
     yaxis_title="Magnitude da tensão (V)",
 )
 plots.save_figure(fig, OUTPUT_DIR, "07_tensao_linha_ab_freq")
 
-print(f"\n7 gráficos comparativos (14 arquivos: 7 HTML + 7 PNG) gravados em '{OUTPUT_DIR}/'.")
+print(f"\n10 gráficos comparativos (20 arquivos: 10 HTML + 10 PNG) gravados em '{OUTPUT_DIR}/'.")
 
 
 # =============================================================================
