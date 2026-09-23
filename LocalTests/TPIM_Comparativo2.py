@@ -1,21 +1,10 @@
-"""MIT_RePlan_Comparativo1.py — Comparação de acionamentos à velocidade nominal.
+"""TPIM_Comparativo2.py — Comparação de acionamentos a 50% da velocidade (TPIM 1.5hp).
 
-Simula o MIT M-C-5283001 (REPLAN) — os mesmos parâmetros elétricos e de
-simulação de ``MIT_RePlan.py`` (ver ``mit_replan_common.py``) — sob três
-formas de acionamento distintas, todas visando a velocidade/frequência
-nominal, com a carga nominal aplicada em t = T_LOAD:
-
-    1. Fonte AC ideal, tensão nominal aplicada diretamente
-       (partida direta - DOL)              .run_direct_on_line()
-    2. Inversor V/F (controle escalar
-       em malha aberta)                    .run_with_inverter_vf()
-    3. Inversor FOC (controle vetorial
-       por orientação de campo, malha
-       fechada)                            .run_with_inverter_foc()
-
-Para cada uma das grandezas abaixo, é gerado um único gráfico sobrepondo
-os três cenários (uma curva por acionamento), permitindo comparar
-diretamente o comportamento transitório e de regime.
+Equivalente a ``MIT_RePlan_Comparativo2.py``, aplicado ao motor de 1.5 hp
+de ``tpim_1p5hp_example.py``: compara Inversor V/F e Inversor FOC com
+referência de frequência reduzida a 30 Hz (50% da nominal de 60 Hz), carga
+nominal aplicada em t = T_LOAD. Sem cenário DOL (a fonte AC ideal não
+admite referência de frequência reduzida).
 
 Domínio do tempo
 -----------------
@@ -32,63 +21,57 @@ Domínio da frequência
 
 Uso
 ---
-    python MIT_RePlan_Comparativo1.py
+    python TPIM_Comparativo2.py
 """
 
 import pandas as pd
 
 from ross.units import Q_
 
-import mit_replan_common as common
 import mit_replan_plots as plots
 import pi_robustness_common as pi
+import tpim_1p5hp_example as common
 
 
-OUTPUT_DIR = "figs_comparativo_1"
-
-
-# =============================================================================
-# 1. Motor e vetor de tempo (compartilhados entre os três cenários)
-# =============================================================================
-
-motor, p = common.build_motor()
-t = common.time_vector()
+OUTPUT_DIR = "figs_tpim_comparativo_2"
+FREQUENCY_REF = Q_(30.0, "Hz")   # 50% da frequência/velocidade síncrona nominal
 
 
 # =============================================================================
-# 2. Simulação dos três cenários de acionamento
+# 1. Motor e vetor de tempo (compartilhados entre os dois cenários)
 # =============================================================================
 
-print("Simulando cenário 1/3 — Fonte AC direta (DOL)...")
-results_ac = motor.run_direct_on_line(
-    t,
-    time_step=common.TIME_STEP,
-    load_torque_entrance_time=common.T_LOAD,
-    load_torque_ratio=1.0,
-)
+motor = common.build_motor()
+t = common.time_vector(tf=common.TF, dt=common.DT)
 
-print("Simulando cenário 2/3 — Inversor V/F...")
+
+# =============================================================================
+# 2. Simulação dos dois cenários de acionamento
+# =============================================================================
+
+print("Simulando cenário 1/2 — Inversor V/F (30 Hz)...")
 results_vf = motor.run_with_inverter_vf(
     t,
+    time_step=common.TUTORIAL_TIME_STEP,
     frequency_s=common.FREQUENCY_S,
     load_torque_entrance_time=common.T_LOAD,
     load_torque_ratio=1.0,
     time_ramp=common.TIME_RAMP,
-    frequency_ref=Q_(common.FN_HZ, "Hz"),
+    frequency_ref=FREQUENCY_REF,
 )
 
-print("Simulando cenário 3/3 — Inversor FOC...")
+print("Simulando cenário 2/2 — Inversor FOC (30 Hz)...")
 results_foc = motor.run_with_inverter_foc(
     t,
+    time_step=common.TUTORIAL_TIME_STEP,
     load_torque_entrance_time=common.T_LOAD,
     load_torque_ratio=1.0,
     time_ramp=common.TIME_RAMP,
     frequency_s=common.FREQUENCY_S,
-    frequency_ref=Q_(common.FN_HZ, "Hz"),
+    frequency_ref=FREQUENCY_REF,
 )
 
 results_by_scenario = {
-    "Fonte CA (partida direta)": results_ac,
     "Inversor V/F": results_vf,
     "Inversor FOC": results_foc,
 }
@@ -107,7 +90,7 @@ print(f"\nGerando gráficos comparativos em '{OUTPUT_DIR}/'...")
 fig = plots.compare_time(
     results_by_scenario,
     plots.get_electric_torque,
-    title="Comparativo 1 — Conjugados (velocidade nominal)",
+    title="TPIM 1.5hp — Comparativo 2 — Conjugados (30 Hz / 50% da velocidade nominal)",
     yaxis_title="Torque (N·m)",
     reference_signal=plots.get_load_torque,
     reference_name="Torque de carga (referência)",
@@ -117,7 +100,7 @@ plots.save_figure(fig, OUTPUT_DIR, "01_conjugados_tempo")
 fig = plots.compare_time(
     results_by_scenario,
     plots.get_speed_rpm,
-    title="Comparativo 1 — Velocidade (velocidade nominal)",
+    title="TPIM 1.5hp — Comparativo 2 — Velocidade (30 Hz / 50% da velocidade nominal)",
     yaxis_title="Velocidade (RPM)",
 )
 plots.save_figure(fig, OUTPUT_DIR, "02_velocidade_tempo")
@@ -125,7 +108,7 @@ plots.save_figure(fig, OUTPUT_DIR, "02_velocidade_tempo")
 fig = plots.compare_time(
     results_by_scenario,
     plots.get_current_a,
-    title="Comparativo 1 — Corrente de Fase A (velocidade nominal)",
+    title="TPIM 1.5hp — Comparativo 2 — Corrente de Fase A (30 Hz / 50% da velocidade nominal)",
     yaxis_title="Corrente (A)",
 )
 plots.save_figure(fig, OUTPUT_DIR, "03_corrente_fase_a_tempo")
@@ -136,7 +119,7 @@ plots.save_figure(fig, OUTPUT_DIR, "03_corrente_fase_a_tempo")
 fig = plots.compare_frequency(
     results_by_scenario,
     plots.get_electric_torque,
-    title="Comparativo 1 — Conjugados (FFT, velocidade nominal)",
+    title="TPIM 1.5hp — Comparativo 2 — Conjugados (FFT, 30 Hz / 50% da velocidade nominal)",
     yaxis_title="Magnitude do torque (N·m)",
 )
 plots.save_figure(fig, OUTPUT_DIR, "04_conjugados_freq")
@@ -144,7 +127,7 @@ plots.save_figure(fig, OUTPUT_DIR, "04_conjugados_freq")
 fig = plots.compare_frequency(
     results_by_scenario,
     plots.get_speed_rpm,
-    title="Comparativo 1 — Velocidade (FFT, velocidade nominal)",
+    title="TPIM 1.5hp — Comparativo 2 — Velocidade (FFT, 30 Hz / 50% da velocidade nominal)",
     yaxis_title="Magnitude da velocidade (RPM)",
 )
 plots.save_figure(fig, OUTPUT_DIR, "05_velocidade_freq")
@@ -152,7 +135,7 @@ plots.save_figure(fig, OUTPUT_DIR, "05_velocidade_freq")
 fig = plots.compare_frequency(
     results_by_scenario,
     plots.get_current_a,
-    title="Comparativo 1 — Corrente de Fase A (FFT, velocidade nominal)",
+    title="TPIM 1.5hp — Comparativo 2 — Corrente de Fase A (FFT, 30 Hz / 50% da velocidade nominal)",
     yaxis_title="Magnitude da corrente (A)",
 )
 plots.save_figure(fig, OUTPUT_DIR, "06_corrente_fase_a_freq")
@@ -160,7 +143,7 @@ plots.save_figure(fig, OUTPUT_DIR, "06_corrente_fase_a_freq")
 fig = plots.compare_frequency(
     results_by_scenario,
     plots.get_line_voltage_ab,
-    title="Comparativo 1 — Tensão de Linha AB (FFT, velocidade nominal)",
+    title="TPIM 1.5hp — Comparativo 2 — Tensão de Linha AB (FFT, 30 Hz / 50% da velocidade nominal)",
     yaxis_title="Magnitude da tensão (V)",
 )
 plots.save_figure(fig, OUTPUT_DIR, "07_tensao_linha_ab_freq")
@@ -171,10 +154,6 @@ print(f"\n7 gráficos comparativos (14 arquivos: 7 HTML + 7 PNG) gravados em '{O
 # =============================================================================
 # 4. Métricas de resposta ao degrau de carga (protocolo "Robustez da Sintonia PI")
 # =============================================================================
-# Tempo de acomodação, erro de regime, sobressinal e convergência (seção
-# "07" do protocolo), aplicados aos mesmos três cenários acima. Cada
-# acionamento usa sua própria dinâmica/sintonia nativa — nada é copiado ou
-# sobrescrito entre cenários (ver pi_robustness_common.py).
 
 torque_final = motor.Tnom
 speed_final_by_scenario = {

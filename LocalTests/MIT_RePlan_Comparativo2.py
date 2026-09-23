@@ -38,10 +38,13 @@ Uso
     python MIT_RePlan_Comparativo2.py
 """
 
+import pandas as pd
+
 from ross.units import Q_
 
 import mit_replan_common as common
 import mit_replan_plots as plots
+import pi_robustness_common as pi
 
 
 OUTPUT_DIR = "figs_comparativo_2"
@@ -81,8 +84,8 @@ results_foc = motor.run_with_inverter_foc(
 )
 
 results_by_scenario = {
-    "V/F Inverter": results_vf,
-    "FOC Inverter": results_foc,
+    "Inversor V/F": results_vf,
+    "Inversor FOC": results_foc,
 }
 
 
@@ -102,7 +105,7 @@ fig = plots.compare_time(
     title="Comparativo 2 — Conjugados (30 Hz / 50% da velocidade nominal)",
     yaxis_title="Torque (N·m)",
     reference_signal=plots.get_load_torque,
-    reference_name="Load Torque (reference)",
+    reference_name="Torque de carga (referência)",
 )
 plots.save_figure(fig, OUTPUT_DIR, "01_conjugados_tempo")
 
@@ -110,7 +113,7 @@ fig = plots.compare_time(
     results_by_scenario,
     plots.get_speed_rpm,
     title="Comparativo 2 — Velocidade (30 Hz / 50% da velocidade nominal)",
-    yaxis_title="Speed (RPM)",
+    yaxis_title="Velocidade (RPM)",
 )
 plots.save_figure(fig, OUTPUT_DIR, "02_velocidade_tempo")
 
@@ -118,7 +121,7 @@ fig = plots.compare_time(
     results_by_scenario,
     plots.get_current_a,
     title="Comparativo 2 — Corrente de Fase A (30 Hz / 50% da velocidade nominal)",
-    yaxis_title="Current (A)",
+    yaxis_title="Corrente (A)",
 )
 plots.save_figure(fig, OUTPUT_DIR, "03_corrente_fase_a_tempo")
 
@@ -129,7 +132,7 @@ fig = plots.compare_frequency(
     results_by_scenario,
     plots.get_electric_torque,
     title="Comparativo 2 — Conjugados (FFT, 30 Hz / 50% da velocidade nominal)",
-    yaxis_title="Torque magnitude (N·m)",
+    yaxis_title="Magnitude do torque (N·m)",
 )
 plots.save_figure(fig, OUTPUT_DIR, "04_conjugados_freq")
 
@@ -137,7 +140,7 @@ fig = plots.compare_frequency(
     results_by_scenario,
     plots.get_speed_rpm,
     title="Comparativo 2 — Velocidade (FFT, 30 Hz / 50% da velocidade nominal)",
-    yaxis_title="Speed magnitude (RPM)",
+    yaxis_title="Magnitude da velocidade (RPM)",
 )
 plots.save_figure(fig, OUTPUT_DIR, "05_velocidade_freq")
 
@@ -145,7 +148,7 @@ fig = plots.compare_frequency(
     results_by_scenario,
     plots.get_current_a,
     title="Comparativo 2 — Corrente de Fase A (FFT, 30 Hz / 50% da velocidade nominal)",
-    yaxis_title="Current magnitude (A)",
+    yaxis_title="Magnitude da corrente (A)",
 )
 plots.save_figure(fig, OUTPUT_DIR, "06_corrente_fase_a_freq")
 
@@ -153,8 +156,40 @@ fig = plots.compare_frequency(
     results_by_scenario,
     plots.get_line_voltage_ab,
     title="Comparativo 2 — Tensão de Linha AB (FFT, 30 Hz / 50% da velocidade nominal)",
-    yaxis_title="Voltage magnitude (V)",
+    yaxis_title="Magnitude da tensão (V)",
 )
 plots.save_figure(fig, OUTPUT_DIR, "07_tensao_linha_ab_freq")
 
 print(f"\n7 gráficos comparativos (14 arquivos: 7 HTML + 7 PNG) gravados em '{OUTPUT_DIR}/'.")
+
+
+# =============================================================================
+# 4. Métricas de resposta ao degrau de carga (protocolo "Robustez da Sintonia PI")
+# =============================================================================
+
+torque_final = motor.Tnom
+speed_final_by_scenario = {
+    name: pi.pre_step_baseline(r.t, r.speed, common.T_LOAD)
+    for name, r in results_by_scenario.items()
+}
+
+table_torque = pi.build_comparison_table(
+    results_by_scenario,
+    plots.get_electric_torque,
+    {name: torque_final for name in results_by_scenario},
+    "Degrau de carga - Torque",
+    t_start=common.T_LOAD,
+)
+table_speed = pi.build_comparison_table(
+    results_by_scenario,
+    lambda r: r.speed,
+    speed_final_by_scenario,
+    "Degrau de carga - Velocidade",
+    t_start=common.T_LOAD,
+)
+
+metrics_table = pd.concat([table_torque, table_speed], ignore_index=True)
+metrics_csv = f"{OUTPUT_DIR}/metrics_degrau_carga.csv"
+metrics_table.to_csv(metrics_csv, index=False)
+print(f"\n[OK] {metrics_csv}")
+print(metrics_table.to_string(index=False))

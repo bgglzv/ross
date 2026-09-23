@@ -1,9 +1,15 @@
-"""MIT_RePlan_Comparativo1.py — Comparação de acionamentos à velocidade nominal.
+"""TPIM_Comparativo1.py — Comparação de acionamentos à velocidade nominal (TPIM 1.5hp).
 
-Simula o MIT M-C-5283001 (REPLAN) — os mesmos parâmetros elétricos e de
-simulação de ``MIT_RePlan.py`` (ver ``mit_replan_common.py``) — sob três
-formas de acionamento distintas, todas visando a velocidade/frequência
-nominal, com a carga nominal aplicada em t = T_LOAD:
+Equivalente a ``MIT_RePlan_Comparativo1.py``, mesma estrutura e mesmos
+gráficos, mas aplicado ao motor de 1.5 hp recuperado de
+``tutorial_motor_part_1/2/3.ipynb`` (ver ``tpim_1p5hp_example.py``) em vez
+do MIT M-C-5283001 da REPLAN. Permite comparar o mesmo trio de
+acionamentos (DOL / V-F / FOC) num motor de porte totalmente diferente
+(1.5 hp x 2474 kW), cada um com sua própria sintonia PI auto-calculada —
+nenhum ganho de controlador é copiado ou sobrescrito entre motores.
+
+Formas de acionamento, todas visando a velocidade/frequência nominal, com
+a carga nominal aplicada em t = T_LOAD:
 
     1. Fonte AC ideal, tensão nominal aplicada diretamente
        (partida direta - DOL)              .run_direct_on_line()
@@ -12,10 +18,6 @@ nominal, com a carga nominal aplicada em t = T_LOAD:
     3. Inversor FOC (controle vetorial
        por orientação de campo, malha
        fechada)                            .run_with_inverter_foc()
-
-Para cada uma das grandezas abaixo, é gerado um único gráfico sobrepondo
-os três cenários (uma curva por acionamento), permitindo comparar
-diretamente o comportamento transitório e de regime.
 
 Domínio do tempo
 -----------------
@@ -32,27 +34,27 @@ Domínio da frequência
 
 Uso
 ---
-    python MIT_RePlan_Comparativo1.py
+    python TPIM_Comparativo1.py
 """
 
 import pandas as pd
 
 from ross.units import Q_
 
-import mit_replan_common as common
 import mit_replan_plots as plots
 import pi_robustness_common as pi
+import tpim_1p5hp_example as common
 
 
-OUTPUT_DIR = "figs_comparativo_1"
+OUTPUT_DIR = "figs_tpim_comparativo_1"
 
 
 # =============================================================================
 # 1. Motor e vetor de tempo (compartilhados entre os três cenários)
 # =============================================================================
 
-motor, p = common.build_motor()
-t = common.time_vector()
+motor = common.build_motor()
+t = common.time_vector(tf=common.TF, dt=common.DT)
 
 
 # =============================================================================
@@ -62,7 +64,6 @@ t = common.time_vector()
 print("Simulando cenário 1/3 — Fonte AC direta (DOL)...")
 results_ac = motor.run_direct_on_line(
     t,
-    time_step=common.TIME_STEP,
     load_torque_entrance_time=common.T_LOAD,
     load_torque_ratio=1.0,
 )
@@ -70,6 +71,7 @@ results_ac = motor.run_direct_on_line(
 print("Simulando cenário 2/3 — Inversor V/F...")
 results_vf = motor.run_with_inverter_vf(
     t,
+    time_step=common.TUTORIAL_TIME_STEP,
     frequency_s=common.FREQUENCY_S,
     load_torque_entrance_time=common.T_LOAD,
     load_torque_ratio=1.0,
@@ -80,6 +82,7 @@ results_vf = motor.run_with_inverter_vf(
 print("Simulando cenário 3/3 — Inversor FOC...")
 results_foc = motor.run_with_inverter_foc(
     t,
+    time_step=common.TUTORIAL_TIME_STEP,
     load_torque_entrance_time=common.T_LOAD,
     load_torque_ratio=1.0,
     time_ramp=common.TIME_RAMP,
@@ -107,7 +110,7 @@ print(f"\nGerando gráficos comparativos em '{OUTPUT_DIR}/'...")
 fig = plots.compare_time(
     results_by_scenario,
     plots.get_electric_torque,
-    title="Comparativo 1 — Conjugados (velocidade nominal)",
+    title="TPIM 1.5hp — Comparativo 1 — Conjugados (velocidade nominal)",
     yaxis_title="Torque (N·m)",
     reference_signal=plots.get_load_torque,
     reference_name="Torque de carga (referência)",
@@ -117,7 +120,7 @@ plots.save_figure(fig, OUTPUT_DIR, "01_conjugados_tempo")
 fig = plots.compare_time(
     results_by_scenario,
     plots.get_speed_rpm,
-    title="Comparativo 1 — Velocidade (velocidade nominal)",
+    title="TPIM 1.5hp — Comparativo 1 — Velocidade (velocidade nominal)",
     yaxis_title="Velocidade (RPM)",
 )
 plots.save_figure(fig, OUTPUT_DIR, "02_velocidade_tempo")
@@ -125,7 +128,7 @@ plots.save_figure(fig, OUTPUT_DIR, "02_velocidade_tempo")
 fig = plots.compare_time(
     results_by_scenario,
     plots.get_current_a,
-    title="Comparativo 1 — Corrente de Fase A (velocidade nominal)",
+    title="TPIM 1.5hp — Comparativo 1 — Corrente de Fase A (velocidade nominal)",
     yaxis_title="Corrente (A)",
 )
 plots.save_figure(fig, OUTPUT_DIR, "03_corrente_fase_a_tempo")
@@ -136,7 +139,7 @@ plots.save_figure(fig, OUTPUT_DIR, "03_corrente_fase_a_tempo")
 fig = plots.compare_frequency(
     results_by_scenario,
     plots.get_electric_torque,
-    title="Comparativo 1 — Conjugados (FFT, velocidade nominal)",
+    title="TPIM 1.5hp — Comparativo 1 — Conjugados (FFT, velocidade nominal)",
     yaxis_title="Magnitude do torque (N·m)",
 )
 plots.save_figure(fig, OUTPUT_DIR, "04_conjugados_freq")
@@ -144,7 +147,7 @@ plots.save_figure(fig, OUTPUT_DIR, "04_conjugados_freq")
 fig = plots.compare_frequency(
     results_by_scenario,
     plots.get_speed_rpm,
-    title="Comparativo 1 — Velocidade (FFT, velocidade nominal)",
+    title="TPIM 1.5hp — Comparativo 1 — Velocidade (FFT, velocidade nominal)",
     yaxis_title="Magnitude da velocidade (RPM)",
 )
 plots.save_figure(fig, OUTPUT_DIR, "05_velocidade_freq")
@@ -152,7 +155,7 @@ plots.save_figure(fig, OUTPUT_DIR, "05_velocidade_freq")
 fig = plots.compare_frequency(
     results_by_scenario,
     plots.get_current_a,
-    title="Comparativo 1 — Corrente de Fase A (FFT, velocidade nominal)",
+    title="TPIM 1.5hp — Comparativo 1 — Corrente de Fase A (FFT, velocidade nominal)",
     yaxis_title="Magnitude da corrente (A)",
 )
 plots.save_figure(fig, OUTPUT_DIR, "06_corrente_fase_a_freq")
@@ -160,7 +163,7 @@ plots.save_figure(fig, OUTPUT_DIR, "06_corrente_fase_a_freq")
 fig = plots.compare_frequency(
     results_by_scenario,
     plots.get_line_voltage_ab,
-    title="Comparativo 1 — Tensão de Linha AB (FFT, velocidade nominal)",
+    title="TPIM 1.5hp — Comparativo 1 — Tensão de Linha AB (FFT, velocidade nominal)",
     yaxis_title="Magnitude da tensão (V)",
 )
 plots.save_figure(fig, OUTPUT_DIR, "07_tensao_linha_ab_freq")

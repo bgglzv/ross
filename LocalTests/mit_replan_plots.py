@@ -139,7 +139,7 @@ def compare_time(results_by_scenario, get_signal, title, yaxis_title,
 
     fig.update_layout(
         title=title,
-        xaxis_title="Time (s)",
+        xaxis_title="Tempo (s)",
         yaxis_title=yaxis_title,
     )
 
@@ -189,7 +189,7 @@ def compare_frequency(results_by_scenario, get_signal, title, yaxis_title,
 
     fig.update_layout(
         title=title,
-        xaxis_title=f"Frequency ({frequency_units})",
+        xaxis_title=f"Frequência ({frequency_units})",
         yaxis_title=yaxis_title,
     )
 

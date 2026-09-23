@@ -101,20 +101,22 @@ T_LOAD    = 16.0   # s   — instante de aplicação da carga nominal
 # FREQUENCY_S não é só a frequência de chaveamento SVPWM: no InverterFOC ela
 # também define, via o método de bandwidth, os ganhos de TODAS as malhas de
 # controle em cascata (BWp_iqs = BWp_ids = BWi_ids = FREQUENCY_S/8,
-# BWp_w = BWi_ids/8, BWi_w = BWp_w/8). Baixá-la para "resolver" a amostragem
-# numérica também desafina o controle: a 500 Hz a malha de velocidade fica
-# com BWi_w ≈ 1 Hz, lenta demais para amortecer a resposta desta máquina de
-# alta inércia, e o conjugado diverge (picos > 1 000 000 N·m). 2000 Hz dá
-# larguras de banda compatíveis com o motor M-C-5283001 (57,5 kg·m²).
+# BWp_w = BWi_ids/8, BWi_w = BWp_w/8) — os ganhos são sempre recalculados
+# automaticamente a partir deste valor pelo próprio InverterFOC, nunca
+# fixados manualmente aqui. Valores baixos demais (ex.: 500 Hz) desafinam
+# a malha de velocidade desta máquina de alta inércia (57,5 kg·m²) a ponto
+# de o conjugado divergir (picos > 1 000 000 N·m); 5 kHz — igual à
+# frequência de chaveamento usada no motor de bancada — dá larguras de
+# banda estáveis para o motor M-C-5283001.
 #
 # Por isso o passo interno é deixado em ``None`` (não informado) nas
 # chamadas de ``run_with_inverter_vf``/``run_with_inverter_foc``: cada
 # método usa então seu próprio default, Ts/200 (Ts = 1/FREQUENCY_S) — a
 # resolução que a própria biblioteca considera adequada para a modulação
-# SVPWM. É mais lento (sobretudo no FOC, cujo laço fechado não é compilado
-# via numba) do que um passo mais grosseiro, mas evita a instabilidade
-# numérica observada com passos maiores.
-FREQUENCY_S = Q_(2000.0, "Hz")
+# SVPWM. Com FREQUENCY_S mais alta esse passo fica mais fino (mais lento,
+# sobretudo no FOC, cujo laço fechado não é compilado via numba), mas evita
+# a instabilidade numérica observada com passos maiores.
+FREQUENCY_S = Q_(5000.0, "Hz")
 
 TIME_RAMP = 8.0   # s — rampa de aceleração até a referência,
                    # concluída bem antes de T_LOAD = 16 s
