@@ -1,0 +1,12 @@
+{
+  "pct_total": 99.98,
+  "pct_rampa": 99.91001799640073,
+  "pct_regime_vazio": 100.0,
+  "pct_apos_carga": 100.0,
+  "razao_maxima": 1659.6682211642292,
+  "passo": 1e-05,
+  "fator": 1.35,
+  "conjugado_minimo": -0.6703541127682008,
+  "conjugado_maximo": 9.897201860014741,
+  "corrente_pico_a": 14.992056877973805
+}

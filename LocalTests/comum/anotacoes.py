@@ -56,10 +56,10 @@ def media_movel(t, y, janela_s=SUAVIZACAO_S):
     n = max(1, int(round(janela_s / dt)))
     if n <= 1:
         return np.asarray(y, dtype=float)
-    kernel = np.ones(n) / n
     esq = n // 2
     dir_ = n - 1 - esq
-    return np.convolve(np.pad(y, (esq, dir_), mode="edge"), kernel, mode="valid")
+    acumulada = np.concatenate(([0.0], np.cumsum(np.pad(y, (esq, dir_), mode="edge"), dtype=float)))
+    return (acumulada[n:] - acumulada[:-n]) / n
 
 
 def _primeiro_cruzamento(tt, yy, nivel, sentido):

@@ -1,0 +1,15 @@
+{
+  "pct_total": 24.108999999999998,
+  "pct_rampa": 26.06908758193463,
+  "pct_regime_vazio": 64.32257290291612,
+  "pct_apos_carga": 0.8979940133732442,
+  "razao_maxima": 62.426556099469764,
+  "fator": 1.35,
+  "iqs_max": 18.018997906509952,
+  "kfw_minimo": 0.9,
+  "kfw_medio_vazio": 0.9000001116740389,
+  "kfw_final": 0.9,
+  "conjugado_minimo": -10.664079122739809,
+  "conjugado_maximo": 24.22478424838574,
+  "corrente_pico_a": 19.869073417980925
+}
