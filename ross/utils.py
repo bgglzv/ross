@@ -13,7 +13,11 @@ from numpy.fft import fft
 from numpy import linalg as la
 from plotly import graph_objects as go
 from copy import deepcopy as copy
+from ross.units import check_units
 from scipy.integrate import cumulative_trapezoid as integrate
+from tsdownsample import MinMaxLTTBDownsampler
+
+_downsampler = MinMaxLTTBDownsampler()
 
 
 class NumpyEncoder(json.JSONEncoder):
@@ -148,7 +152,7 @@ def read_table_file(file, element, sheet_name=0, n=0, sheet_type="Model"):
     Examples
     --------
     >>> import os
-    >>> file_path = os.path.dirname(os.path.realpath(__file__)) + '/tests/data/shaft_si.xls'
+    >>> file_path = os.path.dirname(os.path.realpath(__file__)) + '/data/shaft_si.xls'
     >>> read_table_file(file_path, "shaft", sheet_type="Model", sheet_name="Model") # doctest: +ELLIPSIS
     {'L': [0.03...
     """
@@ -170,14 +174,14 @@ def read_table_file(file, element, sheet_name=0, n=0, sheet_type="Model"):
         optional_parameter_columns["cyy"] = ["cyy"]
         optional_parameter_columns["cxy"] = ["cxy"]
         optional_parameter_columns["cyx"] = ["cyx"]
-        optional_parameter_columns["frequency"] = ["frequency", "speed"]
+        optional_parameter_columns["speed"] = ["speed", "frequency"]
         default_dictionary["kyy"] = None
         default_dictionary["kxy"] = 0
         default_dictionary["kyx"] = 0
         default_dictionary["cyy"] = None
         default_dictionary["cxy"] = 0
         default_dictionary["cyx"] = 0
-        default_dictionary["frequency"] = None
+        default_dictionary["speed"] = None
     elif element == "shaft":
         if sheet_type == "Model":
             header_key_word = "od_left"
@@ -410,9 +414,7 @@ def read_table_file(file, element, sheet_name=0, n=0, sheet_type="Model"):
     if convert_to_rad_per_sec:
         for i in range(0, df.shape[0]):
             if element == "bearing":
-                parameters["frequency"][i] = (
-                    parameters["frequency"][i] * 0.104_719_755_119_7
-                )
+                parameters["speed"][i] = parameters["speed"][i] * 0.104_719_755_119_7
     parameters.update(new_materials)
     return parameters
 
@@ -474,8 +476,8 @@ def visualize_matrix(rotor, matrix, frequency=None, **kwargs):
 
         A[np.ix_(g_dofs, g_dofs)] += elm_matrix
 
-        for l0, g0 in zip(l_dofs, g_dofs):
-            for l1, g1 in zip(l_dofs, g_dofs):
+        for l0, g0 in zip(l_dofs, g_dofs, strict=True):
+            for l1, g1 in zip(l_dofs, g_dofs, strict=True):
                 if elm_matrix[l0, l1] != 0:
                     E[g0, g1].append(
                         "<br>"
@@ -1107,6 +1109,62 @@ def make_speed_array(speed, t):
     return speed, displacement, acceleration
 
 
+@check_units
+def speed_range_from_endpoints(
+    speed_start, speed_stop, num_points=None, points_factor=20
+):
+    """Make an evenly spaced speed range from its end points.
+
+    Each end point can be given in any speed unit. When ``num_points`` is not
+    given, it grows with the square root of the span, so a narrow range gets a
+    finer step than a wide one: the step is about ``sqrt(span) / points_factor``
+    rad/s, and doubling the span multiplies the number of points by about 1.4.
+
+    The range is meant for the analyses that sweep the speed, such as
+    :py:meth:`ross.Rotor.run_campbell`, :py:meth:`ross.Rotor.run_freq_response`
+    and :py:meth:`ross.Rotor.run_unbalance_response`. The Campbell curves are
+    smooth and each of their points is a full modal analysis, so a lower
+    ``points_factor`` (around 4) is enough for them.
+
+    Parameters
+    ----------
+    speed_start : float, pint.Quantity
+        First speed of the range (rad/s).
+    speed_stop : float, pint.Quantity
+        Last speed of the range (rad/s). Must be greater than ``speed_start``.
+    num_points : int, optional
+        Number of points of the range, both end points included.
+        Default is ``ceil(points_factor * sqrt(speed_stop - speed_start))``,
+        with the span in rad/s, limited to the interval [20, 2000].
+    points_factor : float, optional
+        Factor of the default number of points. Default is 20.
+
+    Returns
+    -------
+    speed_range : np.ndarray
+        Evenly spaced speeds (rad/s).
+
+    Examples
+    --------
+    >>> from ross.units import Q_
+    >>> speed_range = speed_range_from_endpoints(Q_(0, "Hz"), Q_(3000, "RPM"))
+    >>> len(speed_range), round(speed_range[-1], 2)
+    (355, 314.16)
+    >>> len(speed_range_from_endpoints(Q_(0, "RPM"), Q_(3000, "RPM"), num_points=31))
+    31
+    """
+    span = speed_stop - speed_start
+    if span <= 0:
+        raise ValueError("speed_stop must be greater than speed_start.")
+
+    if num_points is None:
+        num_points = int(np.clip(np.ceil(points_factor * np.sqrt(span)), 20, 2000))
+    elif num_points < 2:
+        raise ValueError("num_points must be at least 2.")
+
+    return np.linspace(speed_start, speed_stop, int(num_points))
+
+
 def assemble_C_K_matrices(elements, C0, K0, *args):
     """Assemble damping and stiffness matrices considering
     specified elements a rotor.
@@ -1249,12 +1307,12 @@ def convert_6dof_to_4dof(rotor):
     new_rotor = copy(rotor)
 
     # Modify matrix methods to get 4 dof matrices
-    new_rotor.M = lambda frequency=None, synchronous=False: remove_dofs(
-        rotor.M(frequency=frequency, synchronous=synchronous)
+    new_rotor.M = lambda frequency=None, speed=None, synchronous=False: remove_dofs(
+        rotor.M(frequency=frequency, speed=speed, synchronous=synchronous)
     )
-    new_rotor.K = lambda frequency: remove_dofs(rotor.K(frequency))
+    new_rotor.K = lambda frequency, speed=None: remove_dofs(rotor.K(frequency, speed))
     new_rotor.Ksdt = lambda: remove_dofs(rotor.Ksdt())
-    new_rotor.C = lambda frequency: remove_dofs(rotor.C(frequency))
+    new_rotor.C = lambda frequency, speed=None: remove_dofs(rotor.C(frequency, speed))
     new_rotor.G = lambda: remove_dofs(rotor.G())
 
     # Because of lru_cache, we need to unwrap the methods
@@ -1313,12 +1371,16 @@ def convert_6dof_to_torsional(rotor):
     dofs = [i for i in range(rotor.ndof) if (i - 5) % 6 != 0 or i < 5]
 
     # Modify matrix methods to get 1 (torsional only) dof matrices
-    new_rotor.M = lambda frequency=None, synchronous=False: remove_dofs(
-        rotor.M(frequency=frequency, synchronous=synchronous), dofs
+    new_rotor.M = lambda frequency=None, speed=None, synchronous=False: remove_dofs(
+        rotor.M(frequency=frequency, speed=speed, synchronous=synchronous), dofs
     )
-    new_rotor.K = lambda frequency: remove_dofs(rotor.K(frequency), dofs)
+    new_rotor.K = lambda frequency, speed=None: remove_dofs(
+        rotor.K(frequency, speed), dofs
+    )
     new_rotor.Ksdt = lambda: remove_dofs(rotor.Ksdt(), dofs)
-    new_rotor.C = lambda frequency: remove_dofs(rotor.C(frequency), dofs)
+    new_rotor.C = lambda frequency, speed=None: remove_dofs(
+        rotor.C(frequency, speed), dofs
+    )
     new_rotor.G = lambda: remove_dofs(rotor.G(), dofs)
 
     # Because of lru_cache, we need to unwrap the methods
@@ -1750,87 +1812,62 @@ def is_scalar(parameter, parameter_name):
     return np.array(parameter)
 
 
-def steady_state_index(
-    signal,
-    tolerance=0.02,
-    final_value=None,
-    tail_fraction=0.1,
-    min_hold=1,
-    use_relative_tolerance=True,
-):
-    """
-    Find the first index from which `signal` stays within a tolerance band
-    around its final (steady-state) value for the rest of the array.
+def downsample_figure(fig, n_out):
+    """Downsample each Scatter in the figure to approximately n_out points.
 
     Parameters
     ----------
-    signal : array_like
-        The time-series data (e.g., velocity(t)).
-    tolerance : float, default 0.02
-        Allowed deviation from the final value.
-        - If use_relative_tolerance=True: fraction of |final_value| (0.02 = 2%).
-        - If use_relative_tolerance=False: absolute value in the same units as `signal`.
-    final_value : float, optional
-        The steady-state value to compare against. If None, it is estimated
-        as the mean of the last `tail_fraction` of the samples.
-    tail_fraction : float, default 0.1
-        Fraction of the signal (from the end) used to estimate `final_value`
-        when it is not provided.
-    min_hold : int, default 1
-        Minimum number of consecutive samples that must remain inside the
-        tolerance band, counted from the returned index onward, to confirm
-        settling (helps avoid false positives from noise or overshoot
-        crossing the band momentarily).
-    use_relative_tolerance : bool, default True
-        Whether `tolerance` is relative (fraction of final_value) or absolute.
+    fig : plotly.graph_objects.Figure
+        The figure to downsample.
+    n_out : int
+        The number of points to downsample to.
 
     Returns
     -------
-    idx : int or None
-        Index of the first sample of the steady-state region.
-        Returns None if the signal never settles within tolerance.
-    band : tuple(float, float)
-        (lower_bound, upper_bound) used for the check, useful for plotting.
-
-    Notes
-    -----
-    - The band must hold from `idx` to the end of the array (not just for
-      `min_hold` samples) — `min_hold` only sets how many trailing samples
-      near the end of the array are still required as a minimum check window
-      when the signal is very short.
-    - If your signal is noisy, increase `tolerance` or pre-filter the signal
-      (e.g., moving average) before calling this function.
-
-    Example
-    -------
-    >>> t = np.linspace(0, 5, 500)
-    >>> v = 10 * (1 - np.exp(-t / 0.8)) + np.random.normal(0, 0.05, 500)
-    >>> idx, band = steady_state_index(v, tolerance=0.02)
-    >>> print(t[idx])
+    plotly.graph_objects.Figure
+        The downsampled figure.
     """
-    signal = np.asarray(signal, dtype=float)
-    n = len(signal)
+    if n_out is None:
+        return fig
 
-    if n == 0:
-        return None, (None, None)
+    for trace in fig.data:
+        y = np.asarray(trace.y)
 
-    if final_value is None:
-        tail_len = max(1, int(tail_fraction * n))
-        final_value = np.mean(signal[-tail_len:])
+        if y.size <= n_out:
+            continue
 
-    if use_relative_tolerance:
-        margin = tolerance * abs(final_value)
-    else:
-        margin = tolerance
+        x = np.ascontiguousarray(trace.x, dtype=np.float64)
+        y = np.ascontiguousarray(y, dtype=np.float64)
+        idx = _downsampler.downsample(x, y, n_out=int(n_out))
+        trace.x = x[idx]
+        trace.y = y[idx]
 
-    lower_bound = final_value - margin
-    upper_bound = final_value + margin
+    return fig
 
-    inside_band = (signal >= lower_bound) & (signal <= upper_bound)
 
-    for i in range(n):
-        window_end = max(i + min_hold, n)
-        if np.all(inside_band[i:window_end]):
-            return i, (lower_bound, upper_bound)
+def limit_data_range(x, y, range_limits):
+    """Limit the range of the x and y data to the given range limits.
+    Parameters
+    ----------
+    x : numpy.ndarray
+        The x data.
+    y : numpy.ndarray
+        The y data.
+    range_limits : tuple
+        The range limits.
 
-    return None, (lower_bound, upper_bound)
+    Returns
+    -------
+    tuple
+        The limited x and y data.
+    """
+    if range_limits is None:
+        return x, y
+
+    delta = 0.01 * (range_limits[1] - range_limits[0])
+    mask = (x >= range_limits[0] - delta) & (x <= range_limits[1] + delta)
+
+    if not np.any(mask):
+        raise ValueError(f"No data within the range {range_limits}.")
+
+    return x[mask], y[mask]

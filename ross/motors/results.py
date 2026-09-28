@@ -7,10 +7,9 @@ import plotly.graph_objects as go
 from scipy.interpolate import interp1d
 import numpy as np
 
-from plotly_resampler import FigureResampler
-
 from ross.results import Results
-from ross.units import Q_, check_units
+from ross.units import Q_, check_units, format_unit
+from ross.utils import limit_data_range, downsample_figure
 from .utils import windowed_dfft
 
 
@@ -29,7 +28,7 @@ class PhaseResults(Results):
     >>> t = np.arange(0, tf + dt, dt)
     >>> results = motor.run_direct_on_line(t)
     >>> current = PhaseResults(results.t, results.currents, "I", results.t_eval)
-    >>> current.units
+    >>> current.unit
     'A'
     >>> fig = current.plot(reference_frame="alpha-beta")
     """
@@ -45,8 +44,8 @@ class PhaseResults(Results):
     }
 
     _DATA_TYPE_MAP = {
-        "I": {"units": "A", "name": "Current"},
-        "V": {"units": "V", "name": "Voltage"},
+        "I": {"unit": "A", "name": "Current"},
+        "V": {"unit": "V", "name": "Voltage"},
     }
 
     def __init__(self, t, data, data_type, t_eval=None):
@@ -77,7 +76,7 @@ class PhaseResults(Results):
             )
 
         self.name = self._DATA_TYPE_MAP[data_type]["name"]
-        self.units = self._DATA_TYPE_MAP[data_type]["units"]
+        self.unit = self._DATA_TYPE_MAP[data_type]["unit"]
 
         min_dt = 1e-4
         dt = np.diff(self.t).min()
@@ -85,7 +84,14 @@ class PhaseResults(Results):
 
         self.t_eval = t_eval
 
-    def plot(self, reference_frame="a-b-c", fig=None, n_shown_samples=None, **kwargs):
+    def plot(
+        self,
+        reference_frame="a-b-c",
+        fig=None,
+        time_range=None,
+        n_shown_samples=None,
+        **kwargs,
+    ):
         """Plot data over time in selected reference frame.
 
         Parameters
@@ -95,6 +101,9 @@ class PhaseResults(Results):
             'alpha-beta' (Clarke), 'd-q' (Park). Default is 'a-b-c'.
         fig : plotly.graph_objects.Figure, optional
             Figure to add traces to. If None, creates new figure.
+        time_range : tuple, optional
+            Tuple with (min, max) values for the x-axis range, in seconds.
+            Default is None.
         n_shown_samples : int, optional
             Number of samples to display in the plot. If None, all samples are displayed.
         **kwargs
@@ -123,10 +132,12 @@ class PhaseResults(Results):
 
         for axis in reference_frame:
             try:
+                t, amp = limit_data_range(self.t, self.data[axis], time_range)
+
                 fig.add_trace(
                     go.Scatter(
-                        x=self.t,
-                        y=self.data[axis],
+                        x=t,
+                        y=amp,
                         name=f"{self.data_type}<sub>{self._REFERENCE_MAP[axis]}</sub>",
                     )
                 )
@@ -139,16 +150,15 @@ class PhaseResults(Results):
         fig.update_layout(
             title=f"Phase {self.name}s",
             xaxis_title="Time (s)",
-            yaxis_title=f"{self.name} ({self.units})",
+            yaxis_title=f"{self.name} ({format_unit(self.unit)})",
         )
+
+        if time_range is not None:
+            fig.update_xaxes(range=time_range)
 
         fig.update_layout(**kwargs)
 
-        n_samples = n_shown_samples or self.n_shown_samples
-        if n_samples is not None:
-            fig = FigureResampler(fig, default_n_shown_samples=n_samples)
-
-        return fig
+        return downsample_figure(fig, n_shown_samples or self.n_shown_samples)
 
     @check_units
     def plot_dfft(
@@ -207,21 +217,14 @@ class PhaseResults(Results):
         dt = self.t[1] - self.t[0]
 
         for axis in reference_frame:
-            freq, mag = windowed_dfft(self.data[axis], dt)
-
-            if frequency_range is not None:
-                delta = 0.01 * (frequency_range[1] - frequency_range[0])
-                mask = (freq >= frequency_range[0] - delta) & (
-                    freq <= frequency_range[1] + delta
-                )
-                mag = mag[mask]
-                freq = freq[mask]
+            freq, amp = windowed_dfft(self.data[axis], dt)
+            freq, amp = limit_data_range(freq, amp, frequency_range)
 
             try:
                 fig.add_trace(
                     go.Scatter(
                         x=Q_(freq, "Hz").to(frequency_units).m,
-                        y=mag,
+                        y=amp,
                         name=f"{self.data_type}<sub>{self._REFERENCE_MAP[axis]}</sub>",
                     )
                 )
@@ -233,22 +236,18 @@ class PhaseResults(Results):
 
         fig.update_layout(
             title=f"Phase {self.name}s",
-            xaxis_title=f"Frequency ({frequency_units})",
-            yaxis_title=f"{self.name} ({self.units})",
+            xaxis_title=f"Frequency ({format_unit(frequency_units)})",
+            yaxis_title=f"{self.name} ({format_unit(self.unit)})",
         )
 
         if frequency_range is not None:
             fig.update_xaxes(
-                range=[min_freq, max_freq], rangeslider=dict(visible=False)
+                range=(min_freq, max_freq), rangeslider=dict(visible=False)
             )
 
         fig.update_layout(**kwargs)
 
-        n_samples = n_shown_samples or self.n_shown_samples
-        if n_samples is not None and n_samples < len(fig.data[0].x):
-            fig = FigureResampler(fig, default_n_shown_samples=n_samples)
-
-        return fig
+        return downsample_figure(fig, n_shown_samples or self.n_shown_samples)
 
 
 class MotorResponseResults(Results):
@@ -387,52 +386,49 @@ class MotorResponseResults(Results):
         dt = self.t[1] - self.t[0]
 
         for name, signal in result_dict.items():
-            freq, mag = windowed_dfft(signal, dt)
-
-            if frequency_range is not None:
-                delta = 0.01 * (frequency_range[1] - frequency_range[0])
-                mask = (freq >= frequency_range[0] - delta) & (
-                    freq <= frequency_range[1] + delta
-                )
-                mag = mag[mask]
-                freq = freq[mask]
+            freq, amp = windowed_dfft(signal, dt)
+            freq, amp = limit_data_range(freq, amp, frequency_range)
 
             fig.add_trace(
                 go.Scatter(
                     x=Q_(freq, "Hz").to(frequency_units).m,
-                    y=mag,
+                    y=amp,
                     name=name,
                 )
             )
 
         fig.update_layout(
             title=title,
-            xaxis_title=f"Frequency ({frequency_units})",
+            xaxis_title=f"Frequency ({format_unit(frequency_units)})",
             yaxis_title=yaxis_title,
         )
 
         if frequency_range is not None:
             fig.update_xaxes(
-                range=[min_freq, max_freq], rangeslider=dict(visible=False)
+                range=(min_freq, max_freq), rangeslider=dict(visible=False)
             )
 
         fig.update_layout(**kwargs)
 
-        n_samples = n_shown_samples or self.n_shown_samples
-        if n_samples is not None and n_samples < len(fig.data[0].x):
-            fig = FigureResampler(fig, default_n_shown_samples=n_samples)
-
-        return fig
+        return downsample_figure(fig, n_shown_samples or self.n_shown_samples)
 
     def _plot_time(
-        self, result_dict, title, yaxis_title, fig, n_shown_samples=None, **kwargs
+        self,
+        result_dict,
+        title,
+        yaxis_title,
+        fig,
+        time_range=None,
+        n_shown_samples=None,
+        **kwargs,
     ):
-
         for name, signal in result_dict.items():
+            t, amp = limit_data_range(self.t, signal, time_range)
+
             fig.add_trace(
                 go.Scatter(
-                    x=self.t,
-                    y=signal,
+                    x=t,
+                    y=amp,
                     name=name,
                 )
             )
@@ -443,13 +439,12 @@ class MotorResponseResults(Results):
             yaxis_title=yaxis_title,
         )
 
+        if time_range is not None:
+            fig.update_xaxes(range=time_range)
+
         fig.update_layout(**kwargs)
 
-        n_samples = n_shown_samples or self.n_shown_samples
-        if n_samples is not None:
-            fig = FigureResampler(fig, default_n_shown_samples=n_samples)
-
-        return fig
+        return downsample_figure(fig, n_shown_samples or self.n_shown_samples)
 
     @check_units
     def plot_torque(
@@ -458,6 +453,7 @@ class MotorResponseResults(Results):
         torque_units="N*m",
         frequency_units="Hz",
         frequency_range=None,
+        time_range=None,
         n_shown_samples=None,
         fig=None,
         **kwargs,
@@ -478,6 +474,9 @@ class MotorResponseResults(Results):
             Frequencies that are not within the range are filtered out and are not plotted.
             It is possible to use a pint Quantity (e.g. Q_((2000, 1000), "RPM")).
             Default is None (no filter).
+        time_range : tuple, optional
+            Tuple with (min, max) values for the x-axis range, in seconds.
+            Default is None.
         n_shown_samples : int, optional
             Number of samples to display in the plot. If None, uses the default value.
         fig : plotly.graph_objects.Figure, optional
@@ -512,7 +511,7 @@ class MotorResponseResults(Results):
                 "Load Torque": Q_(self.load_torque, "N*m").to(torque_units).m,
             },
             title="Motor operation: Electromagnetic Torque and Load Torque",
-            yaxis_title=f"Torque ({torque_units})",
+            yaxis_title=f"Torque ({format_unit(torque_units)})",
             fig=fig,
             n_shown_samples=n_shown_samples,
         )
@@ -528,6 +527,7 @@ class MotorResponseResults(Results):
         else:
             fig = self._plot_time(
                 **main_inputs,
+                time_range=time_range,
                 **kwargs,
             )
 
@@ -540,6 +540,7 @@ class MotorResponseResults(Results):
         speed_units="RPM",
         frequency_units="Hz",
         frequency_range=None,
+        time_range=None,
         n_shown_samples=None,
         fig=None,
         **kwargs,
@@ -560,6 +561,9 @@ class MotorResponseResults(Results):
             Frequencies that are not within the range are filtered out and are not plotted.
             It is possible to use a pint Quantity (e.g. Q_((2000, 1000), "RPM")).
             Default is None (no filter).
+        time_range : tuple, optional
+            Tuple with (min, max) values for the x-axis range, in seconds.
+            Default is None.
         n_shown_samples : int, optional
             Number of samples to display in the plot. If None, uses the default value.
         fig : plotly.graph_objects.Figure, optional
@@ -591,7 +595,7 @@ class MotorResponseResults(Results):
                 "Shaft Speed": Q_(self.speed, "rad/s").to(speed_units).m,
             },
             title="Motor operation: Shaft Speed",
-            yaxis_title=f"Speed ({speed_units})",
+            yaxis_title=f"Speed ({format_unit(speed_units)})",
             fig=fig,
             n_shown_samples=n_shown_samples,
         )
@@ -606,6 +610,7 @@ class MotorResponseResults(Results):
         else:
             fig = self._plot_time(
                 **main_inputs,
+                time_range=time_range,
                 **kwargs,
             )
 
@@ -617,6 +622,7 @@ class MotorResponseResults(Results):
         reference_frame="a-b-c",
         frequency_units="Hz",
         frequency_range=None,
+        time_range=None,
         n_shown_samples=None,
         fig=None,
         **kwargs,
@@ -638,6 +644,9 @@ class MotorResponseResults(Results):
             Frequencies that are not within the range are filtered out and are not plotted.
             It is possible to use a pint Quantity (e.g. Q_((2000, 1000), "RPM")).
             Default is None (no filter).
+        time_range : tuple, optional
+            Tuple with (min, max) values for the x-axis range, in seconds.
+            Default is None.
         n_shown_samples : int, optional
             Number of samples to display in the plot. If None, uses the default value.
         fig : plotly.graph_objects.Figure, optional
@@ -679,6 +688,7 @@ class MotorResponseResults(Results):
             fig = current.plot(
                 reference_frame=reference_frame,
                 fig=fig,
+                time_range=time_range,
                 n_shown_samples=n_shown_samples,
                 **kwargs,
             )
@@ -690,6 +700,7 @@ class MotorResponseResults(Results):
         domain="time",
         frequency_units="Hz",
         frequency_range=None,
+        time_range=None,
         n_shown_samples=None,
         fig=None,
         **kwargs,
@@ -708,6 +719,9 @@ class MotorResponseResults(Results):
             Frequencies that are not within the range are filtered out and are not plotted.
             It is possible to use a pint Quantity (e.g. Q_((2000, 1000), "RPM")).
             Default is None (no filter).
+        time_range : tuple, optional
+            Tuple with (min, max) values for the x-axis range, in seconds.
+            Default is None.
         n_shown_samples : int, optional
             Number of samples to display in the plot. If None, uses the default value.
         fig : plotly.graph_objects.Figure, optional
@@ -745,7 +759,12 @@ class MotorResponseResults(Results):
                 **kwargs,
             )
         else:
-            fig = voltage.plot(fig=fig, n_shown_samples=n_shown_samples, **kwargs)
+            fig = voltage.plot(
+                fig=fig,
+                time_range=time_range,
+                n_shown_samples=n_shown_samples,
+                **kwargs,
+            )
 
         return fig
 
@@ -754,6 +773,7 @@ class MotorResponseResults(Results):
         domain="time",
         frequency_units="Hz",
         frequency_range=None,
+        time_range=None,
         n_shown_samples=None,
         fig=None,
         **kwargs,
@@ -772,6 +792,9 @@ class MotorResponseResults(Results):
             Frequencies that are not within the range are filtered out and are not plotted.
             It is possible to use a pint Quantity (e.g. Q_((2000, 1000), "RPM")).
             Default is None (no filter).
+        time_range : tuple, optional
+            Tuple with (min, max) values for the x-axis range for time domain, in seconds.
+            Default is None.
         n_shown_samples : int, optional
             Number of samples to display in the plot. If None, uses the default value.
         fig : plotly.graph_objects.Figure, optional
@@ -819,6 +842,7 @@ class MotorResponseResults(Results):
         else:
             fig = self._plot_time(
                 **main_inputs,
+                time_range=time_range,
                 **kwargs,
             )
 

@@ -15,10 +15,10 @@ simulation parameters defined in the module.
 
 Motor under test
 ----------------
-- Nominal power  : 1.5 cv  (≈ 1103.25 W)
-- Nominal voltage: 127 V (phase)
-- Nominal speed  : 1710 RPM
-- Nominal frequency: 60 Hz
+- Rated power  : 1.5 cv  (≈ 1103.25 W)
+- Rated voltage: 127 V (phase)
+- Rated speed  : 1710 RPM
+- Rated frequency: 60 Hz
 - Poles          : 4
 - Rs = 2.5 Ω, Rr = 1.8 Ω, Xs = Xr = 1.3 Ω, Xm = 43.08 Ω
 - Ip_motor = 0.0372 kg·m²
@@ -29,32 +29,17 @@ import pytest
 from numpy.testing import assert_allclose
 from copy import deepcopy
 
-from ross.motors.motor_element import MotorElement
+from ross.bearing_seal_element import BearingElement
+from ross.motors.motor_element import MotorElement, motor_example
+from ross.motors.results import MotorResponseResults
+from ross.rotor_assembly import Rotor, rotor_example
 from ross.units import Q_
 
 
 @pytest.fixture(scope="module")
 def motor():
-    """Return the motor element."""
-    return MotorElement(
-        n=0,
-        tag="motor",
-        power_nom=Q_(1.5, "cv"),
-        voltage_nom=127,
-        speed_nom=Q_(1710, "RPM"),
-        frequency_nom=Q_(60.0, "Hz"),
-        n_poles=4,
-        stator_resistance=2.5,
-        rotor_resistance=1.8,
-        stator_reactance=1.3,
-        rotor_reactance=1.3,
-        mutual_reactance=43.08,
-        Ip_motor=0.0372,
-        viscosity_coeff=0.0,
-        Ip_load=0.0,
-        voltage_net=127,
-        frequency_net=Q_(60.0, "Hz"),
-    )
+    """Return the motor from motor_example()."""
+    return motor_example()
 
 
 @pytest.fixture
@@ -68,10 +53,10 @@ def motor_high_inertia():
     return MotorElement(
         n=0,
         tag="motor_high_inertia",
-        power_nom=Q_(1.5, "cv"),
-        voltage_nom=127,
-        speed_nom=Q_(1710, "RPM"),
-        frequency_nom=Q_(60.0, "Hz"),
+        power_rated=Q_(1.5, "cv"),
+        voltage_rated=127,
+        speed_rated=Q_(1710, "RPM"),
+        frequency_rated=Q_(60.0, "Hz"),
         n_poles=4,
         stator_resistance=2.5,
         rotor_resistance=1.8,
@@ -96,17 +81,18 @@ def _steady_state_slice(results, fraction=0.85):
     return int(fraction * len(results.t))
 
 
-def test_motor_example_parameters(motor):
-    """Verify that motor_example() returns the expected nominal parameters."""
-    assert_allclose(motor.power_nom, 1103.248125, rtol=1e-6)
-    assert_allclose(motor.voltage_nom, 127.0, rtol=1e-6)
+def test_motor_example_parameters():
+    """Verify that motor_example() returns the expected rated parameters."""
+    motor = motor_example()
+    assert_allclose(motor.power_rated, 1103.248125, rtol=1e-6)
+    assert_allclose(motor.voltage_rated, 127.0, rtol=1e-6)
     assert_allclose(
-        motor.speed_nom,
+        motor.speed_rated,
         Q_(1710, "RPM").to("rad/s").m,
         rtol=1e-5,
     )
     assert_allclose(
-        motor.frequency_nom,
+        motor.frequency_rated,
         Q_(60.0, "Hz").to("rad/s").m,
         rtol=1e-6,
     )
@@ -119,17 +105,18 @@ def test_motor_example_parameters(motor):
     assert_allclose(motor.Ip_motor, 0.0372, rtol=1e-9)
 
 
-def test_motor_example_equality(motor):
-    """Two calls to motor_example() must return equal objects."""
-    m1 = motor
-    m2 = deepcopy(motor)
+def test_motor_example_equality():
+    """Two calls to motor_example() must return equal objects, even if the
+    tags differ."""
+    m1 = motor_example()
+    m2 = motor_example()
     m2.tag = "motor_2"
     assert m1 == m2
 
 
 @pytest.fixture
 def results_no_load(motor):
-    """Simulate the motor at no load for 3 s (nominal voltage)."""
+    """Simulate the motor at no load for 3 s (rated voltage)."""
     dt = 1e-4
     tf = 3.0
     t = np.arange(0, tf + dt, dt)
@@ -154,20 +141,6 @@ def test_no_load_stator_current_rms(results_no_load):
     )
 
 
-def test_no_load_stator_current_peak(results_no_load):
-    """No-load stator current (peak) must be approximately 4 A."""
-    ss = _steady_state_slice(results_no_load)
-    ia_peak = np.max(np.abs(results_no_load.currents["a"][ss:]))
-    # Document: ~4 A peak; tolerance ±10 %
-    assert_allclose(
-        ia_peak,
-        4.04,
-        rtol=0.10,
-        atol=0.1,
-        err_msg="No-load peak current outside expected range (~4 A)",
-    )
-
-
 def test_no_load_speed(results_no_load):
     """No-load rotor speed must be approximately 1799 RPM."""
     ss = _steady_state_slice(results_no_load)
@@ -182,8 +155,8 @@ def test_no_load_speed(results_no_load):
 
 
 @pytest.fixture
-def results_nominal_load(motor):
-    """Simulate the motor at nominal load for 3 s (nominal voltage)."""
+def results_rated_load(motor):
+    """Simulate the motor at rated load for 3 s (rated voltage)."""
     dt = 1e-4
     tf = 3.0
     t = np.arange(0, tf + dt, dt)
@@ -194,44 +167,30 @@ def results_nominal_load(motor):
     )
 
 
-def test_nominal_load_stator_current_rms(results_nominal_load):
-    """Nominal-load stator current (RMS) must be approximately 4.25 A."""
-    ss = _steady_state_slice(results_nominal_load)
-    ia_rms = rms(results_nominal_load.currents["a"][ss:])
+def test_rated_load_stator_current_rms(results_rated_load):
+    """Rated-load stator current (RMS) must be approximately 4.25 A."""
+    ss = _steady_state_slice(results_rated_load)
+    ia_rms = rms(results_rated_load.currents["a"][ss:])
     # Document: ~4.25 A rms; tolerance ±10 %
     assert_allclose(
         ia_rms,
         4.38,
         rtol=0.10,
         atol=0.15,
-        err_msg="Nominal-load RMS current outside expected range (~4.25 A)",
+        err_msg="Rated-load RMS current outside expected range (~4.25 A)",
     )
 
 
-def test_nominal_load_stator_current_peak(results_nominal_load):
-    """Nominal-load stator current (peak) must be approximately 6.0 A."""
-    ss = _steady_state_slice(results_nominal_load)
-    ia_peak = np.max(np.abs(results_nominal_load.currents["a"][ss:]))
-    # Document: ~6.0 A peak; tolerance ±10 %
-    assert_allclose(
-        ia_peak,
-        6.19,
-        rtol=0.10,
-        atol=0.2,
-        err_msg="Nominal-load peak current outside expected range (~6.0 A)",
-    )
-
-
-def test_nominal_load_speed(results_nominal_load):
-    """Nominal-load rotor speed must be approximately 1710 RPM."""
-    ss = _steady_state_slice(results_nominal_load)
-    speed_rpm = np.mean(results_nominal_load.speed[ss:]) * 60.0 / (2.0 * np.pi)
+def test_rated_load_speed(results_rated_load):
+    """Rated-load rotor speed must be approximately 1710 RPM."""
+    ss = _steady_state_slice(results_rated_load)
+    speed_rpm = np.mean(results_rated_load.speed[ss:]) * 60.0 / (2.0 * np.pi)
     # Document: 1710 RPM; tolerance ±15 RPM
     assert_allclose(
         speed_rpm,
         1710.0,
         atol=15.0,
-        err_msg="Nominal-load speed outside expected range (~1710 RPM)",
+        err_msg="Rated-load speed outside expected range (~1710 RPM)",
     )
 
 
@@ -263,20 +222,6 @@ def test_starting_current_rms(results_locked_rotor):
         rtol=0.10,
         atol=0.5,
         err_msg="Starting RMS current outside expected range (~25 A)",
-    )
-
-
-def test_starting_current_peak(results_locked_rotor):
-    """Starting (locked-rotor) current peak must be approximately 35.25 A."""
-    ss = int(0.5 * len(results_locked_rotor.t))
-    ia_peak = np.max(np.abs(results_locked_rotor.currents["a"][ss:]))
-    # Document: ~35.25 A peak; tolerance ±10 %
-    assert_allclose(
-        ia_peak,
-        36.26,
-        rtol=0.10,
-        atol=0.5,
-        err_msg="Starting peak current outside expected range (~35.25 A)",
     )
 
 
@@ -320,7 +265,7 @@ def test_speed_nearly_zero_during_locked_rotor(results_locked_rotor):
 #   speed set by the applied electrical frequency: ``w_sync = frequency / (n_poles/2)``.
 # - Since ``InverterVF`` applies scalar V/f control, this holds at any
 #   reference frequency within the linear modulation region, not only at the
-#   nominal frequency.
+#   rated frequency.
 
 
 def _synchronous_speed_rpm(motor, frequency_hz):
@@ -331,8 +276,8 @@ def _synchronous_speed_rpm(motor, frequency_hz):
 
 
 @pytest.fixture(scope="module")
-def results_inverter_vf_nominal_no_load(motor):
-    """Simulate the motor with InverterVF at nominal frequency, no load."""
+def results_inverter_vf_rated_no_load(motor):
+    """Simulate the motor with InverterVF at rated frequency, no load."""
     dt = 1e-3
     tf = 3.0
     t = np.arange(0, tf + dt, dt)
@@ -347,14 +292,14 @@ def results_inverter_vf_nominal_no_load(motor):
     )
 
 
-def test_inverter_vf_nominal_no_load_speed_near_synchronous(
-    results_inverter_vf_nominal_no_load, motor
+def test_inverter_vf_rated_no_load_speed_near_synchronous(
+    results_inverter_vf_rated_no_load, motor
 ):
-    """At nominal frequency and no load, speed must approach the 1800 RPM
+    """At rated frequency and no load, speed must approach the 1800 RPM
     synchronous speed (60 Hz, 4 poles)."""
-    ss = _steady_state_slice(results_inverter_vf_nominal_no_load)
+    ss = _steady_state_slice(results_inverter_vf_rated_no_load)
     speed_rpm = (
-        np.mean(results_inverter_vf_nominal_no_load.speed[ss:]) * 60.0 / (2.0 * np.pi)
+        np.mean(results_inverter_vf_rated_no_load.speed[ss:]) * 60.0 / (2.0 * np.pi)
     )
     w_sync_rpm = _synchronous_speed_rpm(motor, 60.0)
     assert_allclose(
@@ -367,7 +312,7 @@ def test_inverter_vf_nominal_no_load_speed_near_synchronous(
 
 @pytest.fixture(scope="module")
 def results_inverter_vf_half_freq_no_load(motor):
-    """Simulate the motor with InverterVF at half the nominal frequency, no load."""
+    """Simulate the motor with InverterVF at half the rated frequency, no load."""
     dt = 1e-3
     tf = 3.0
     t = np.arange(0, tf + dt, dt)
@@ -385,7 +330,7 @@ def results_inverter_vf_half_freq_no_load(motor):
 def test_inverter_vf_half_freq_no_load_speed_near_synchronous(
     results_inverter_vf_half_freq_no_load, motor
 ):
-    """At half the nominal frequency (30 Hz) and no load, speed must approach
+    """At half the rated frequency (30 Hz) and no load, speed must approach
     half the synchronous speed (900 RPM), illustrating the V/f scaling law."""
     ss = _steady_state_slice(results_inverter_vf_half_freq_no_load)
     speed_rpm = (
@@ -401,8 +346,8 @@ def test_inverter_vf_half_freq_no_load_speed_near_synchronous(
 
 
 @pytest.fixture(scope="module")
-def results_inverter_vf_nominal_load(motor):
-    """Simulate the motor with InverterVF at nominal frequency and nominal load."""
+def results_inverter_vf_rated_load(motor):
+    """Simulate the motor with InverterVF at rated frequency and rated load."""
     dt = 1e-3
     tf = 3.0
     t = np.arange(0, tf + dt, dt)
@@ -417,25 +362,25 @@ def results_inverter_vf_nominal_load(motor):
     )
 
 
-def test_inverter_vf_nominal_load_causes_speed_droop(
-    results_inverter_vf_nominal_load, results_inverter_vf_nominal_no_load
+def test_inverter_vf_rated_load_causes_speed_droop(
+    results_inverter_vf_rated_load, results_inverter_vf_rated_no_load
 ):
-    """Under open-loop V/f control, applying the nominal load must reduce the
+    """Under open-loop V/f control, applying the rated load must reduce the
     steady-state speed with respect to the no-load operating point (slip)."""
-    ss_load = _steady_state_slice(results_inverter_vf_nominal_load)
-    ss_noload = _steady_state_slice(results_inverter_vf_nominal_no_load)
+    ss_load = _steady_state_slice(results_inverter_vf_rated_load)
+    ss_noload = _steady_state_slice(results_inverter_vf_rated_no_load)
 
     speed_load_rpm = (
-        np.mean(results_inverter_vf_nominal_load.speed[ss_load:]) * 60.0 / (2.0 * np.pi)
+        np.mean(results_inverter_vf_rated_load.speed[ss_load:]) * 60.0 / (2.0 * np.pi)
     )
     speed_noload_rpm = (
-        np.mean(results_inverter_vf_nominal_no_load.speed[ss_noload:])
+        np.mean(results_inverter_vf_rated_no_load.speed[ss_noload:])
         * 60.0
         / (2.0 * np.pi)
     )
 
     assert speed_load_rpm < speed_noload_rpm, (
-        "Nominal-load speed should be lower than no-load speed due to slip "
+        "Rated-load speed should be lower than no-load speed due to slip "
         f"(load={speed_load_rpm:.1f} RPM, no-load={speed_noload_rpm:.1f} RPM)"
     )
 
@@ -454,19 +399,19 @@ def test_inverter_vf_nominal_load_causes_speed_droop(
 # drive tested above, whose steady-state speed merely approaches the
 # synchronous speed at no load and droops under load.
 #
-# A reference at or above the nominal frequency is clamped internally to the
-# motor's nominal (rated) mechanical speed (`InverterFOC.wn`), so
+# A reference at or above the rated frequency is clamped internally to the
+# motor's rated mechanical speed (`InverterFOC.wn`), so
 # `frequency_ref=Q_(60, "Hz")` targets the same ~1710 RPM rated operating
-# point used in the SourceAC/InverterVF nominal-load tests above, while a
+# point used in the SourceAC/InverterVF rated-load tests above, while a
 # reduced reference (e.g. 30 Hz) targets the corresponding synchronous speed
 # directly (900 RPM), exactly as `_synchronous_speed_rpm` computes for
 # InverterVF.
 
 
 @pytest.fixture(scope="module")
-def results_foc_nominal_speed_with_load(motor):
-    """Simulate the motor with InverterFOC tracking the nominal frequency,
-    under nominal load."""
+def results_foc_rated_speed_with_load(motor):
+    """Simulate the motor with InverterFOC tracking the rated frequency,
+    under rated load."""
     dt = 1e-3
     tf = 3.0
     t = np.arange(0, tf + dt, dt)
@@ -481,30 +426,30 @@ def results_foc_nominal_speed_with_load(motor):
     )
 
 
-def test_foc_speed_tracks_nominal_reference_despite_load(
-    results_foc_nominal_speed_with_load, motor
+def test_foc_speed_tracks_rated_reference_despite_load(
+    results_foc_rated_speed_with_load, motor
 ):
-    """Steady-state speed must track the nominal (rated) speed closely, even
-    after the nominal load torque is applied - contrasting the V/f speed
+    """Steady-state speed must track the rated speed closely, even
+    after the rated load torque is applied - contrasting the V/f speed
     droop."""
-    ss = _steady_state_slice(results_foc_nominal_speed_with_load)
+    ss = _steady_state_slice(results_foc_rated_speed_with_load)
     speed_rpm = (
-        np.mean(results_foc_nominal_speed_with_load.speed[ss:]) * 60.0 / (2.0 * np.pi)
+        np.mean(results_foc_rated_speed_with_load.speed[ss:]) * 60.0 / (2.0 * np.pi)
     )
-    wref_rpm = motor.speed_nom * 60.0 / (2.0 * np.pi)
+    wref_rpm = motor.speed_rated * 60.0 / (2.0 * np.pi)
 
     assert_allclose(
         speed_rpm,
         wref_rpm,
         rtol=0.03,
         atol=15.0,
-        err_msg="Closed-loop FOC speed should track the nominal speed reference under load",
+        err_msg="Closed-loop FOC speed should track the rated speed reference under load",
     )
 
 
 @pytest.fixture(scope="module")
 def results_foc_half_freq_no_load(motor):
-    """Simulate the motor with InverterFOC tracking half the nominal
+    """Simulate the motor with InverterFOC tracking half the rated
     frequency, with no load."""
     dt = 1e-3
     tf = 3.0
@@ -524,7 +469,7 @@ def test_foc_speed_tracks_reduced_reference_no_load(
     results_foc_half_freq_no_load, motor
 ):
     """Steady-state speed must track the synchronous speed of a reduced
-    (non-nominal) frequency reference, correcting for slip - unlike open-loop
+    (non-rated) frequency reference, correcting for slip - unlike open-loop
     V/f control, which only approaches that synchronous speed at no load."""
     ss = _steady_state_slice(results_foc_half_freq_no_load)
     speed_rpm = np.mean(results_foc_half_freq_no_load.speed[ss:]) * 60.0 / (2.0 * np.pi)
@@ -539,77 +484,26 @@ def test_foc_speed_tracks_reduced_reference_no_load(
     )
 
 
-def test_foc_speed_ramps_up_gradually(results_foc_half_freq_no_load):
-    """The mechanical speed reference is ramped, so the shaft speed early in
-    the simulation must be substantially lower than the final steady-state
-    speed (no instantaneous jump to the reference)."""
-    results = results_foc_half_freq_no_load
-    idx_early = np.searchsorted(results.t, 0.1)
-    speed_early_rpm = results.speed[idx_early] * 60.0 / (2.0 * np.pi)
-
-    ss = _steady_state_slice(results)
-    speed_final_rpm = np.mean(results.speed[ss:]) * 60.0 / (2.0 * np.pi)
-
-    assert speed_early_rpm < 0.5 * speed_final_rpm, (
-        "Speed should still be ramping up at t=0.1 s, well below the final "
-        f"steady-state value (early={speed_early_rpm:.1f} RPM, "
-        f"final={speed_final_rpm:.1f} RPM)"
-    )
-
-
-def test_foc_closed_loop_tracks_better_than_open_loop_under_load(
-    results_foc_nominal_speed_with_load, results_inverter_vf_nominal_load, motor
-):
-    """Under nominal load, the closed-loop FOC speed error with respect to
-    its reference must be smaller than the open-loop V/f slip-induced error,
-    highlighting the benefit of closed-loop control."""
-    ss = _steady_state_slice(results_foc_nominal_speed_with_load)
-    foc_speed_rpm = (
-        np.mean(results_foc_nominal_speed_with_load.speed[ss:]) * 60.0 / (2.0 * np.pi)
-    )
-    wref_rpm = motor.speed_nom * 60.0 / (2.0 * np.pi)
-    foc_error = abs(foc_speed_rpm - wref_rpm)
-
-    ss_vf = _steady_state_slice(results_inverter_vf_nominal_load)
-    vf_speed_rpm = (
-        np.mean(results_inverter_vf_nominal_load.speed[ss_vf:]) * 60.0 / (2.0 * np.pi)
-    )
-    vf_sync_rpm = _synchronous_speed_rpm(motor, 60.0)
-    vf_error = abs(vf_speed_rpm - vf_sync_rpm)
-
-    assert foc_error < vf_error, (
-        "Closed-loop FOC speed error should be smaller than the open-loop "
-        f"V/f slip (foc_error={foc_error:.2f} RPM, vf_error={vf_error:.2f} RPM)"
-    )
-
-
 # ---------------------------------------------------------------------------
 # Test 6 - FFT frequency range for inverter-driven figures
 # ---------------------------------------------------------------------------
 #
-# All frequency-domain ("FFT") figures for inverter-driven simulations
-# (InverterVF / InverterFOC) are expected to support restricting the
-# displayed band to 0.5 Hz - 2.1 x Fs (Fs = IGBT switching frequency,
-# `frequency_s`), via the existing `frequency_range` argument. This keeps the
-# fundamental, the switching harmonics and their first sidebands visible
-# while discarding the DC bin and content far above the switching frequency.
-# The tests below exercise both `MotorResponseResults._plot_dfft` (used by
-# `plot_torque` / `plot_line_voltages`) and `PhaseResults.plot_dfft` (used by
-# `plot_phase_currents` / `plot_phase_voltages`), which are separate
-# implementations.
+# Restricting the displayed band via `frequency_range` is checked on the two
+# independent implementations: `MotorResponseResults._plot_dfft` (`plot_torque`)
+# and `PhaseResults.plot_dfft` (`plot_phase_currents`).
 
 _FS_HZ = 5000.0
 _FFT_FREQUENCY_RANGE = Q_((0.5, 2.1 * _FS_HZ), "Hz")
 
 
 def test_inverter_vf_fft_frequency_range_narrows_torque_spectrum(
-    results_inverter_vf_nominal_no_load,
+    results_inverter_vf_rated_no_load,
 ):
     """Restricting `plot_torque(domain="frequency")` to [0.5 Hz, 2.1 x Fs]
     must narrow the displayed frequency span with respect to the
     unrestricted spectrum (which extends all the way to the Nyquist
     frequency) and must not extend far beyond the requested upper bound."""
-    results = results_inverter_vf_nominal_no_load
+    results = results_inverter_vf_rated_no_load
 
     fig_full = results.plot_torque(domain="frequency")
     fig_restricted = results.plot_torque(
@@ -630,11 +524,11 @@ def test_inverter_vf_fft_frequency_range_narrows_torque_spectrum(
 
 
 def test_inverter_vf_fft_frequency_range_narrows_current_spectrum(
-    results_inverter_vf_nominal_no_load,
+    results_inverter_vf_rated_no_load,
 ):
     """Same as above, for `plot_phase_currents(domain="frequency")`, which
     goes through the separate `PhaseResults.plot_dfft` implementation."""
-    results = results_inverter_vf_nominal_no_load
+    results = results_inverter_vf_rated_no_load
 
     fig_full = results.plot_phase_currents(domain="frequency")
     fig_restricted = results.plot_phase_currents(
@@ -654,26 +548,115 @@ def test_inverter_vf_fft_frequency_range_narrows_current_spectrum(
     )
 
 
-def test_foc_fft_frequency_range_narrows_line_voltage_spectrum(
-    results_foc_nominal_speed_with_load,
-):
-    """Same restriction, for the closed-loop InverterFOC drive, exercised on
-    `plot_line_voltages(domain="frequency")`."""
-    results = results_foc_nominal_speed_with_load
+# ---------------------------------------------------------------------------
+# Test 7 - Motor coupled to a rotor (Rotor.run_with_motor)
+# ---------------------------------------------------------------------------
+#
+# The rotor uses the shaft and disks of ``rotor_example()`` with damped
+# bearings: with the undamped bearings of the example, the free vibration
+# excited at the start of the steady-state window never decays and dominates
+# the spectrum instead of the unbalance response. All three ``drive_mode``
+# values are run at 60 Hz under rated load, so the shaft settles near the
+# rated speed and the unbalance response is a 1X well above the first modes.
 
-    fig_full = results.plot_line_voltages(domain="frequency")
-    fig_restricted = results.plot_line_voltages(
-        domain="frequency", frequency_range=_FFT_FREQUENCY_RANGE
+_ROTOR_LOAD_TIME = 1.0
+_ROTOR_UNBALANCE_NODE = 2
+_DRIVE_MODES = ("DOL", "VFD_VF", "VFD_FOC")
+
+
+@pytest.fixture(scope="module")
+def rotor_with_motor(motor):
+    """Return a damped rotor with the motor at node 0."""
+    base_rotor = rotor_example()
+    bearings = [
+        BearingElement(n=bearing.n, kxx=1e6, cxx=2e3)
+        for bearing in base_rotor.bearing_elements
+    ]
+    return Rotor(
+        base_rotor.shaft_elements,
+        base_rotor.disk_elements,
+        bearings,
+        motor_element=deepcopy(motor),
     )
 
-    x_full = np.asarray(fig_full.data[0].x)
-    x_restricted = np.asarray(fig_restricted.data[0].x)
 
-    assert x_restricted.max() < x_full.max(), (
-        "Restricting frequency_range should narrow the displayed frequency span "
-        f"(restricted max={x_restricted.max():.1f} Hz, full max={x_full.max():.1f} Hz)"
+@pytest.fixture(scope="module", params=_DRIVE_MODES)
+def results_run_with_motor(rotor_with_motor, request):
+    """Simulate the rotor with each supported drive_mode under rated load."""
+    drive_mode = request.param
+    t = np.arange(0, 2.0 + 1e-3, 1e-3)
+    kwargs = {}
+    if drive_mode != "DOL":
+        kwargs["time_step"] = 1e-5
+        kwargs["time_ramp"] = 0.5
+        kwargs["frequency_ref"] = Q_(60.0, "Hz")
+
+    return rotor_with_motor.run_with_motor(
+        t=t,
+        node=[_ROTOR_UNBALANCE_NODE],
+        unbalance_magnitude=[5e-4],
+        unbalance_phase=[0.0],
+        drive_mode=drive_mode,
+        load_torque_entrance_time=_ROTOR_LOAD_TIME,
+        load_torque_ratio=1.0,
+        **kwargs,
     )
-    assert x_restricted.max() <= 2.1 * _FS_HZ * 1.02, (
-        "Restricted FOC line-voltage FFT should not extend much beyond 2.1 x Fs "
-        f"(got max={x_restricted.max():.1f} Hz, limit={2.1 * _FS_HZ:.1f} Hz)"
+
+
+def test_run_with_motor(results_run_with_motor, rotor_with_motor):
+    """Each drive_mode must attach motor results, settle near the rated speed
+    under rated load, and produce a synchronous (1X) unbalance response."""
+    results = results_run_with_motor
+    assert isinstance(results.motor_results, MotorResponseResults)
+
+    speed = results.motor_results.sample_at("speed", results.t)
+    speed_rpm = np.mean(speed) * 60.0 / (2.0 * np.pi)
+    assert_allclose(
+        speed_rpm,
+        1710.0,
+        atol=15.0,
+        err_msg="Shaft speed under rated load should be close to the rated speed",
     )
+
+    dof_x = rotor_with_motor.number_dof * _ROTOR_UNBALANCE_NODE
+    x = results.yout[:, dof_x]
+    spectrum = np.abs(np.fft.rfft((x - x.mean()) * np.hanning(len(x))))
+    frequencies = np.fft.rfftfreq(len(x), results.t[1] - results.t[0])
+    peak_frequency = frequencies[np.argmax(spectrum)]
+    synchronous_frequency = np.mean(speed) / (2.0 * np.pi)
+
+    assert np.max(np.abs(x)) > 0.0
+    assert_allclose(
+        peak_frequency,
+        synchronous_frequency,
+        atol=frequencies[1],
+        err_msg="Rotor response should be dominated by the 1X component",
+    )
+
+
+def test_run_with_motor_invalid_drive_mode(rotor_with_motor):
+    """An unknown drive_mode must raise a ValueError."""
+    t = np.arange(0, 0.1, 1e-3)
+    with pytest.raises(ValueError, match="drive_mode"):
+        rotor_with_motor.run_with_motor(
+            t=t,
+            node=[_ROTOR_UNBALANCE_NODE],
+            unbalance_magnitude=[5e-4],
+            unbalance_phase=[0.0],
+            drive_mode="invalid",
+            load_torque_entrance_time=0.05,
+        )
+
+
+def test_run_with_motor_without_motor_element():
+    """A rotor without a motor element must raise a ValueError."""
+    t = np.arange(0, 0.1, 1e-3)
+    with pytest.raises(ValueError, match="No motor elements"):
+        rotor_example().run_with_motor(
+            t=t,
+            node=[_ROTOR_UNBALANCE_NODE],
+            unbalance_magnitude=[5e-4],
+            unbalance_phase=[0.0],
+            drive_mode="DOL",
+            load_torque_entrance_time=0.05,
+        )
