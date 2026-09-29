@@ -39,7 +39,7 @@ def contador_de_saturacao(inversor_base):
             err_w = self.speed_control(t, frequency_ref) - rotor_speed
             iqs_ref_unsat = self.kp_w * err_w + self.ki_w * self.control_state["int_err_w"]
             self.registro_t.append(t)
-            self.registro_razao.append(abs(iqs_ref_unsat) / (3.0 * self.Is_nom))
+            self.registro_razao.append(abs(iqs_ref_unsat) / (3.0 * self.Is_rated))
             return super().get_current_state(t, dt, rotor_speed, ia, ib, ic, frequency_ref)
 
     return FOCContador
@@ -53,9 +53,9 @@ def simular_foc(motor, t, rampa, t_carga, frequencia_chaveamento, time_step, fre
     tensão de linha em tensão do barramento CC. `inversor_classe` substitui o FOC da biblioteca por uma
     subclasse que já registre `registro_t`/`registro_razao` (ver `contador_de_saturacao`).
     """
-    from ross.motors import inverters, motor_element
+    from ross.motors import motor_drive, motor_element
 
-    contador = inversor_classe or contador_de_saturacao(inverters.InverterFOC)
+    contador = inversor_classe or contador_de_saturacao(motor_drive.InverterFOC)
     original = motor_element.InverterFOC
     original_barramento = motor_element.line_to_dc_bus
     motor_element.InverterFOC = contador
@@ -89,8 +89,8 @@ def estatisticas_saturacao(t_reg, razao, rampa, t_carga):
 
 
 def _eventos(motor, t_carga, tf):
-    return an.eventos_do_teste(t_carga, tf, float(motor.Tnom),
-                               float(motor.speed_nom) * 60 / (2 * np.pi), float(motor.Tnom))
+    return an.eventos_do_teste(t_carga, tf, float(motor.T_rated),
+                               float(motor.speed_rated) * 60 / (2 * np.pi), float(motor.T_rated))
 
 
 def _analise(t, y_raw, grandeza, eventos):

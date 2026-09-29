@@ -68,8 +68,8 @@ def gerar_saidas(resultados, motor, sim, pasta, rotulo, freq_ref_hz=60.0):
                              f"{rotulo} — Conjugados (FFT, velocidade nominal)", "Magnitude do torque (N·m)")
     gr.save_figure(f, fig_dir, "04_conjugados_freq")
 
-    torque_nom = float(motor.Tnom)
-    vel_nom_rpm = float(motor.speed_nom) * 60.0 / (2.0 * np.pi)
+    torque_nom = float(motor.T_rated)
+    vel_nom_rpm = float(motor.speed_rated) * 60.0 / (2.0 * np.pi)
     eventos = an.eventos_do_teste(sim.t_carga, sim.tf, torque_nom, vel_nom_rpm, torque_nom)
 
     linhas, resumo = [], []

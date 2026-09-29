@@ -93,14 +93,14 @@ def _imagem(doc, caminho, legenda, largura=15.5):
 
 
 def _parametros(motor, sim):
-    rpm = float(motor.speed_nom) * 60 / (2 * np.pi)
+    rpm = float(motor.speed_rated) * 60 / (2 * np.pi)
     return [
-        ["Potência nominal", f"{float(motor.power_nom) / 1000:.3g} kW"],
-        ["Tensão nominal de fase", f"{float(motor.voltage_nom):.1f} V"],
+        ["Potência nominal", f"{float(motor.power_rated) / 1000:.3g} kW"],
+        ["Tensão nominal de fase", f"{float(motor.voltage_rated):.1f} V"],
         ["Frequência nominal", "60 Hz"],
         ["Polos", str(motor.n_poles)],
         ["Velocidade nominal", f"{rpm:.0f} RPM"],
-        ["Conjugado nominal", f"{float(motor.Tnom):.2f} N·m"],
+        ["Conjugado nominal", f"{float(motor.T_rated):.2f} N·m"],
         ["Inércia do rotor", f"{float(motor.Ip_motor):.4g} kg·m²"],
         ["Frequência de chaveamento", "5000 Hz"],
         ["Rampa de aceleração", f"{sim.rampa:g} s"],

@@ -31,7 +31,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import comum_opcoes as co
 from comum import motores
-from ross.motors.inverters import InverterFOC
+from ross.motors.motor_drive import InverterFOC
 from ross.units import Q_
 
 PASTA = Path(__file__).resolve().parent
@@ -67,7 +67,7 @@ class FOCDigital(InverterFOC):
             err_w = self.speed_control(t, frequency_ref) - rotor_speed
             iqs_ref_unsat = self.kp_w * err_w + self.ki_w * state["int_err_w"]
             self.registro_t.append(t)
-            self.registro_razao.append(abs(iqs_ref_unsat) / (MULTIPLO_CORRENTE * self.Is_nom))
+            self.registro_razao.append(abs(iqs_ref_unsat) / (MULTIPLO_CORRENTE * self.Is_rated))
             self._capturando = True
             self._w_sync, _, _, _ = super().get_current_state(
                 t, dt * n, rotor_speed, ia, ib, ic, frequency_ref)

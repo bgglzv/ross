@@ -34,7 +34,7 @@ def foc_com_limite(multiplo):
     class FOCLimiteInversor(FOCModuloVetor):
         def __init__(self, *args, **kwargs):
             super().__init__(*args, **kwargs)
-            self.iqs_max = float(multiplo * self.Is_nom)
+            self.iqs_max = float(multiplo * self.Is_rated)
 
     return FOCLimiteInversor
 

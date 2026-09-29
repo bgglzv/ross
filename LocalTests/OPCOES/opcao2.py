@@ -26,7 +26,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import comum_opcoes as co
 from comum import motores
-from ross.motors.inverters import InverterFOC
+from ross.motors.motor_drive import InverterFOC
 from ross.motors.utils import clarke_transform, inverse_clarke_transform, park_transform
 from ross.units import Q_
 
@@ -46,7 +46,7 @@ class FOCModuloVetor(InverterFOC):
         super().__init__(*args, **kwargs)
         self.registro_t = []
         self.registro_razao = []
-        self.iqs_max = float(np.sqrt((MULTIPLO_CORRENTE * self.Is_nom) ** 2 - self.ids_ref**2))
+        self.iqs_max = float(np.sqrt((MULTIPLO_CORRENTE * self.Is_rated) ** 2 - self.ids_ref**2))
         FOCModuloVetor.instancias.append(self)
 
     def get_current_state(self, t, dt, rotor_speed, ia, ib, ic, frequency_ref=None):
