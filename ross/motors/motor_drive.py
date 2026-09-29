@@ -882,10 +882,19 @@ class InverterFOC(Inverter):
         # Rated stator current magnitude
         self.Is_rated = abs(Is)
 
-        # PI controller gains (bandwidth method)
-        BWp_iqs = frequency_s / 8
-        BWp_ids = frequency_s / 8
-        BWi_ids = frequency_s / 8
+        # PI controller gains (bandwidth method).
+        # `frequency_s` is the IGBT switching frequency in rad/s (see
+        # `Inverter.__init__`), but the gain formulas below convert a
+        # bandwidth in Hz to rad/s via the explicit `2 * np.pi` (and
+        # `4 * np.pi ** 2`) factors. Convert to Hz once here so those
+        # formulas receive the units they expect; skipping this step
+        # overstates every bandwidth by a factor of 2*pi and destabilizes
+        # the current loop once it runs at its own switching rate instead
+        # of every simulation step.
+        frequency_s_hz = frequency_s / (2 * np.pi)
+        BWp_iqs = frequency_s_hz / 8
+        BWp_ids = frequency_s_hz / 8
+        BWi_ids = frequency_s_hz / 8
         BWp_w = BWi_ids / 8
         BWi_w = BWp_w / 8
 
