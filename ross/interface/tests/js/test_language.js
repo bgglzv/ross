@@ -101,11 +101,13 @@ check('applyLanguage: title comes back', button.getAttribute('title') === 'Delet
 // coming from the internal key (`shafts`) instead of the label, and the
 // language change not rewriting the title.
 
-const { categoryName, refreshTabTitle } = await import('../../frontend/features/modeling.js');
+const { refreshTabTitle } = await import('../../frontend/features/modeling.js');
+const { categoryName } = await import('../../frontend/components/list.js');
 
 function tabButton(category, key) {
     const b = node('tab:' + category);
-    b.setAttribute('onclick', `openTab('${category}')`);
+    b.setAttribute('onclick', `pickTab('${category}')`);
+    b.dataset.tab = category;
     b.dataset.i18n = key;
     return b;
 }

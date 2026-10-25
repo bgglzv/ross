@@ -17,9 +17,17 @@ in DEVIATIONS.
 import re
 from decimal import Decimal
 
-from .element_registry import ross_class_name
+from ross.units import Q_
+
+from .element_registry import (
+    VIEW_FIELDS,
+    ross_class_name,
+    ross_constructor,
+    takes_units,
+)
 from .legacy import migrate_element
-from .node_resolver import effective_nodes
+from .material_names import material_key, ross_material_name, validate_materials
+from .node_resolver import effective_nodes, listed_nodes
 import textwrap
 
 from .schema import unit_map_by_class
@@ -31,7 +39,16 @@ from .schema import unit_map_by_class
 #      the output is byte for byte the same.
 #   3. an explicitly null field counts as absent. Before it became the word
 #      `null` in the middle of the script -- a NameError on first run.
-DEVIATIONS = ("material_name_escaping", "select_value_escaping", "null_as_missing")
+#   4. a material's name loses its spaces (domain/material_names.py): ROSS
+#      refuses them, so the old script raised on its first `rs.Material`. It
+#      changed the one reference case with a space in a name,
+#      `material_com_apostrofo`.
+DEVIATIONS = (
+    "material_name_escaping",
+    "select_value_escaping",
+    "null_as_missing",
+    "material_name_without_spaces",
+)
 
 _DECIMAL = re.compile(r"^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$")
 _RADIX = re.compile(r"^(?:0[xX][0-9a-fA-F]+|0[oO][0-7]+|0[bB][01]+)$")
@@ -123,21 +140,45 @@ def _or(value, default):
     return value if _js_truthy(value) else default
 
 
+STEPS_UNREADABLE = "Field '%s' has to be a number of steps; got '%s'."
+
+
+def _steps(params, key, default):
+    """A step count for `np.linspace`, as an integer literal.
+
+    The analysis reads the field with `int(float(...))` and refuses what that
+    refuses (`services/analysis/base.py`); the export does the same, instead of
+    writing the text into the script, where `np.linspace(0, 100, abc)` would be
+    a `NameError` on the user's machine and `50.5` a `TypeError`. A refusal is
+    a `ValueError`, which reaches the screen as a 400 carrying the sentence.
+    """
+    raw = _or(params.get(key), default)
+    try:
+        return str(int(float(str(raw).strip())))
+    except (TypeError, ValueError, OverflowError) as error:
+        raise ValueError(STEPS_UNREADABLE % (key, raw)) from error
+
+
 def _py_string(value):
     """Escape text into a valid Python string literal."""
     return "'" + _js_str(value).replace("\\", "\\\\").replace("'", "\\'") + "'"
 
 
-def _format_kwargs(obj, exclude_keys=(), class_name=""):
+def _format_kwargs(obj, exclude_keys=(), class_name="", in_si=False):
     """Build `key=value, ...` from what the form returned.
 
     The unit map comes from the schema, inherited units already resolved: a
     BallBearingElement's cxx is declared on BearingElement.
+
+    `in_si` is for a call ROSS does not convert units for
+    (`element_registry.takes_units`): the quantity is still written in the
+    unit it was typed in, and handed over as its number in SI --
+    `Q_(70, 'mm').m_as('meter')`.
     """
     items = []
     unit_map = unit_map_by_class().get(class_name or "", {})
     for key, val in obj.items():
-        if key in exclude_keys or key.endswith("_unit"):
+        if key in exclude_keys or key in VIEW_FIELDS or key.endswith("_unit"):
             continue
         if val is None or (isinstance(val, str) and val == ""):
             continue
@@ -161,11 +202,20 @@ def _format_kwargs(obj, exclude_keys=(), class_name=""):
             final = _js_str(val)
             if is_text and rendered.startswith("[") and _js_truthy(unit):
                 final = "np.array(%s)" % _js_str(val)
-            if _js_truthy(unit):
+            if _js_truthy(unit) and in_si:
+                items.append(
+                    "%s=Q_(%s, '%s').m_as('%s')" % (key, final, unit, _base_unit(unit))
+                )
+            elif _js_truthy(unit):
                 items.append("%s=Q_(%s, '%s')" % (key, final, unit))
             else:
                 items.append("%s=%s" % (key, final))
     return ", ".join(items)
+
+
+def _base_unit(unit):
+    """The SI unit a quantity typed in `unit` is handed over in: 'meter' for mm."""
+    return str(Q_(1, unit).to_base_units().units)
 
 
 def _with_node_arg(element, args, effective_node):
@@ -189,7 +239,7 @@ def _material_expression(element, suffix):
         return "rs.materials.steel"
     return "materials_dict%s.get(%s, default_mat%s)" % (
         suffix,
-        _py_string(str(chosen).lower()),
+        _py_string(material_key(chosen)),
         suffix,
     )
 
@@ -205,10 +255,12 @@ def _build_rotor_block(r_data, suffix):
         if "poisson" in copy_of:
             copy_of["Poisson"] = copy_of.pop("poisson")
         args = _format_kwargs(copy_of, ["name", "element_type"], "Material")
-        name = _or(copy_of.get("name"), "MaterialCustom")
+        # The same name the rotor is built with (domain/material_names.py):
+        # a space in it and the exported script fails where the screen did not.
+        name = ross_material_name(_or(copy_of.get("name"), "MaterialCustom"))
         py += "materials_dict%s[%s] = rs.Material(name=%s, %s)\n" % (
             suffix,
-            _py_string(str(name).lower()),
+            _py_string(material_key(name)),
             _py_string(name),
             args,
         )
@@ -231,25 +283,35 @@ def _build_rotor_block(r_data, suffix):
         s=suffix
     )
 
-    # Disks
+    # Disks: rs.DiskElement from m, Ip and Id, or rs.DiskElement.from_geometry
+    # from the dimensions and a material -- the call the rotor was built with.
     py += "disks_data%s = [\n" % suffix
     nodes = effective_nodes(r_data.get("disks") or [])
     for position, disk in enumerate(r_data.get("disks") or []):
-        args = _format_kwargs(disk, ["element_type"], "DiskElement")
-        args = _with_node_arg(disk, args, nodes[position])
-        py += "    dict(%s),\n" % args
-    py += (
-        "]\ndisks{s} = [rs.DiskElement(**kwargs) for kwargs in disks_data{s}]\n".format(
-            s=suffix
+        make = ross_constructor("disks", disk.get("element_type"))
+        from_geometry = "." in make
+        args = _format_kwargs(
+            disk,
+            ["element_type"] + (["material"] if from_geometry else []),
+            make,
+            in_si=not takes_units(make),
         )
+        args = _with_node_arg(disk, args, nodes[position])
+        if from_geometry:
+            args += ", material=%s" % _material_expression(disk, suffix)
+        py += "    (rs.%s, dict(%s)),\n" % (make, args)
+    py += "]\ndisks{s} = [make(**kwargs) for make, kwargs in disks_data{s}]\n".format(
+        s=suffix
     )
 
     # Gears
     py += "gears_data%s = [\n" % suffix
     nodes = effective_nodes(r_data.get("gears") or [])
     for position, gear in enumerate(r_data.get("gears") or []):
-        klass = ross_class_name("gears", gear.get("element_type"))
-        args = _format_kwargs(gear, ["element_type", "material"], klass)
+        klass = ross_constructor("gears", gear.get("element_type"))
+        args = _format_kwargs(
+            gear, ["element_type", "material"], klass, in_si=not takes_units(klass)
+        )
         args = _with_node_arg(gear, args, nodes[position])
         material = _material_expression(gear, suffix)
         full_args = (
@@ -292,10 +354,10 @@ def _build_rotor_block(r_data, suffix):
 
     # Couplings
     py += "couplings_data%s = [\n" % suffix
-    for coupling in r_data.get("couplings") or []:
-        py += "    dict(%s),\n" % _format_kwargs(
-            coupling, ["element_type"], "CouplingElement"
-        )
+    nodes = listed_nodes(r_data.get("couplings") or [])
+    for position, coupling in enumerate(r_data.get("couplings") or []):
+        args = _format_kwargs(coupling, ["element_type"], "CouplingElement")
+        py += "    dict(%s),\n" % _with_node_arg(coupling, args, nodes[position])
     py += (
         "]\ncouplings{s} = [rs.CouplingElement(**kwargs) "
         "for kwargs in couplings_data{s}]\n"
@@ -374,14 +436,61 @@ def _py_val(params, key, target_unit=None):
     return _js_str(literal)
 
 
+# The frequency response at a radial probe of the model, written into the
+# script where an output names one: the same function as
+# services/analysis/freq_response.py `probe_output` (the packaged executable
+# has no sources to copy it from), and tests/test_freq_response_probes.py
+# holds the two to the same numbers.
+PROBE_OUTPUT = """
+def probe_output(result, node, angle, dofs_per_node):
+    \"\"\"The response a radial probe reads: x cos(angle) + y sin(angle) of its
+    node, as output 0 of results ROSS can plot (ROSS plots one degree of
+    freedom as the output).\"\"\"
+    from ross.results import FrequencyResponseResults
+
+    x = node * dofs_per_node
+    c, s = np.cos(angle), np.sin(angle)
+
+    def along(response):
+        return (c * response[:, x, :] + s * response[:, x + 1, :])[:, None, :]
+
+    return FrequencyResponseResults(
+        along(result.freq_resp),
+        along(result.velc_resp),
+        along(result.accl_resp),
+        result.speed_range,
+        result.number_dof,
+    )
+
+"""
+
+
+def _probe_expression(row):
+    """One row of a probe table as `rs.Probe(...)`.
+
+    A row that named a probe of the model has been filled in from it before
+    the script is written (api/export.py, domain/probe_refs.py): its node, its
+    angle in radians -- none for an axial probe -- its direction and its name.
+    """
+    if not str(row.get("probe", "") or "").strip():
+        return "rs.Probe(%s, %s)" % (
+            _js_str(row.get("node")),
+            _js_str(row.get("angle")),
+        )
+    angle = row.get("angle")
+    args = [str(int(row["node"])), "None" if angle is None else repr(float(angle))]
+    if row.get("direction") == "axial":
+        args.append("direction='axial'")
+    if row.get("tag"):
+        args.append("tag=%s" % _py_string(row["tag"]))
+    return "rs.Probe(%s)" % ", ".join(args)
+
+
 def _probes_expression(params):
     probes = params.get("probes") or []
     if not probes:
         return "rs.Probe(0, 0)"
-    return ", ".join(
-        "rs.Probe(%s, %s)" % (_js_str(s.get("node")), _js_str(s.get("angle")))
-        for s in probes
-    )
+    return ", ".join(_probe_expression(row) for row in probes)
 
 
 def _unbalance_columns(params, mag_default="0.01", phase_default="0.0"):
@@ -452,7 +561,7 @@ def _analysis_block(position, analysis):
         py += "speed_rads = np.linspace(%s, %s, %s)\n" % (
             _py_val(p, "speed_min", "rad/s"),
             _py_val(p, "speed_max", "rad/s"),
-            _js_str(_or(p.get("speed_steps"), 50)),
+            _steps(p, "speed_steps", 50),
         )
         py += (
             "camp_%d = rotor.run_campbell(speed_rads, frequencies=%s, frequency_type=%s, torsional_analysis=%s%s)\n"
@@ -526,7 +635,7 @@ def _analysis_block(position, analysis):
         py += "speed_rads = np.linspace(%s, %s, %s)\n" % (
             _py_val(p, "speed_min", "rad/s"),
             _py_val(p, "speed_max", "rad/s"),
-            _js_str(_or(p.get("speed_steps"), 50)),
+            _steps(p, "speed_steps", 50),
         )
         modes = ", modes=%s" % _js_str(p["modes"]) if _js_truthy(p.get("modes")) else ""
         py += "freq_%d = rotor.run_freq_response(speed_rads%s, free_free=%s%s)\n" % (
@@ -551,6 +660,11 @@ def _analysis_block(position, analysis):
 
         entries = p.get("inps") or [{"node": 0, "dof": 0}]
         outputs = p.get("outs") or [{"node": 0, "dof": 0}]
+        if any(
+            output.get("probe") and output.get("direction") != "axial"
+            for output in outputs
+        ):
+            py += PROBE_OUTPUT
         py += "fig_freq_%d = None\n" % position
         py += "colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b']\n"
         for j in range(max(len(entries), len(outputs))):
@@ -560,21 +674,48 @@ def _analysis_block(position, analysis):
                 _js_str(entry.get("node")),
                 _js_str(entry.get("dof")),
             )
-            py += "g_out = %s * dofs_per_node + %s\n" % (
-                _js_str(output.get("node")),
-                _js_str(output.get("dof")),
-            )
-            py += "fig_temp = freq_%d.%s(inp=g_inp, out=g_out, %s)\n" % (
-                position,
+            # An output that named a probe of the model has been filled in
+            # from it (api/export.py): an axial one reads z of its node, a
+            # radial one its direction, through `probe_output`.
+            source = "freq_%d" % position
+            if not output.get("probe"):
+                py += "g_out = %s * dofs_per_node + %s\n" % (
+                    _js_str(output.get("node")),
+                    _js_str(output.get("dof")),
+                )
+                read_at = "N%s D%s" % (
+                    _js_str(output.get("node")),
+                    _js_str(output.get("dof")),
+                )
+            elif output.get("direction") == "axial":
+                py += "g_out = %d * dofs_per_node + 2\n" % int(output["node"])
+                read_at = output.get("tag") or "probe at node %d" % int(output["node"])
+            else:
+                py += "g_out = 0\n"
+                source = "probe_output(freq_%d, %d, %r, dofs_per_node)" % (
+                    position,
+                    int(output["node"]),
+                    float(output.get("angle") or 0.0),
+                )
+                read_at = output.get("tag") or "probe at node %d" % int(output["node"])
+            py += "fig_temp = %s.%s(inp=g_inp, out=g_out, %s)\n" % (
+                source,
                 method,
                 ", ".join(args),
             )
             py += "for k, trace in enumerate(fig_temp.data):\n"
-            py += '    trace.name = f"In(N%s D%s) | Out(N%s D%s)"\n' % (
+            label = "In(N%s D%s) | Out(%s)" % (
                 _js_str(entry.get("node")),
                 _js_str(entry.get("dof")),
-                _js_str(output.get("node")),
-                _js_str(output.get("dof")),
+                read_at,
+            )
+            # A typed row keeps the f-string it always had; a probe's name is
+            # whatever was typed, braces and quotes included, so it goes in as
+            # a plain literal.
+            py += (
+                '    trace.name = f"%s"\n' % label
+                if not output.get("probe")
+                else "    trace.name = %s\n" % _py_string(label)
             )
             py += '    trace.legendgroup = f"group_%d"\n' % j
             py += "    trace.showlegend = (k == 0)\n"
@@ -646,9 +787,10 @@ def _analysis_block(position, analysis):
             )
 
     elif kind == "unbalance":
-        py += "speed_rads = np.linspace(%s, %s, 50)\n" % (
+        py += "speed_rads = np.linspace(%s, %s, %s)\n" % (
             _py_val(p, "speed_min", "rad/s"),
             _py_val(p, "speed_max", "rad/s"),
+            _steps(p, "speed_steps", 50),
         )
         nodes, mags, phases = _unbalance_columns(p)
         modes = ", modes=%s" % _js_str(p["modes"]) if _js_truthy(p.get("modes")) else ""
@@ -717,7 +859,7 @@ def _analysis_block(position, analysis):
         py += "t_hb = np.linspace(%s, %s, %s)\n" % (
             _js_str(_or(p.get("t_initial"), 0)),
             _js_str(_or(p.get("t_final"), 0.5)),
-            _js_str(_or(p.get("t_steps"), 1001)),
+            _steps(p, "t_steps", 1001),
         )
         py += "harmonic_forces = [{\n"
         py += "    'node': %s,\n" % _js_str(_or(p.get("hb_node"), 0))
@@ -753,7 +895,7 @@ def _analysis_block(position, analysis):
             position,
             _py_val(p, "speed_min", "rad/s"),
             _py_val(p, "speed_max", "rad/s"),
-            _js_str(_or(p.get("speed_steps"), 101)),
+            _steps(p, "speed_steps", 101),
         )
         args = [
             "speed_range=speed_range_%d" % position,
@@ -802,7 +944,7 @@ def _transient_block(position, kind, p):
         py += "speed = %s\n" % _py_val(p, "speed", "rad/s")
         py += "t = np.linspace(0, %s, %s)\n" % (
             _js_str(_or(p.get("t_max"), 1.0)),
-            _js_str(_or(p.get("steps"), 1000)),
+            _steps(p, "steps", 1000),
         )
         py += "dofs_per_node = rotor.number_dof\n"
         py += "F_%d = np.zeros((len(t), rotor.ndof))\n" % position
@@ -822,7 +964,7 @@ def _transient_block(position, kind, p):
         py += "t_sim = np.linspace(%s, %s, %s)\n" % (
             _js_str(_or(p.get("t_initial"), 0)),
             _js_str(_or(p.get("t_final"), 0.5)),
-            _js_str(_or(p.get("t_steps"), 5000)),
+            _steps(p, "t_steps", 5000),
         )
         nodes, mags, phases = _unbalance_columns(p)
         common = (
@@ -969,6 +1111,17 @@ def build_script(project, analyses=(), conversion_type=""):
     cards, each with its analysis type and the parameters its dashboard used.
     """
     project = project or {}
+    # The same refusal the builder makes (domain/material_names.py). The
+    # generated script asks the dictionary with `.get(name, default_mat)`, so a
+    # name nothing carries would come out as a script that runs, draws a rotor
+    # and is made of the wrong metal -- and this one leaves the screen on a
+    # file, where nobody would see it happen.
+    if project.get("isMultiRotor"):
+        validate_materials(project.get("driving_rotor") or {})
+        validate_materials(project.get("driven_rotor") or {})
+    else:
+        validate_materials(project)
+
     py = _compatibility_warning(analyses, conversion_type)
     py += "import ross as rs\nimport numpy as np\nfrom ross.units import Q_\n"
     py += "\n# ==========================================\n# Modeling \n# ==========================================\n"

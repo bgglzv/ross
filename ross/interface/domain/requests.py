@@ -19,7 +19,7 @@ the validation layer would be the only one reaching the user unverified.
 
 from .cache import STRUCTURAL_KEYS
 
-TYPE_NAMES = {dict: "an object", list: "a list", str: "a string"}
+TYPE_NAMES = {dict: "an object", list: "a list", str: "a string", bool: "true or false"}
 
 
 class Field:
@@ -108,9 +108,14 @@ class Envelope:
         )
 
 
+# `figure` is whether to draw ROSS's 2D figure. The 3D view asks for the scene
+# alone: `plot_rotor` is the slow half of this route (about a second on a
+# 200-element rotor, against a millisecond for the scene), and a figure nobody
+# is looking at would be drawn on every keystroke.
 ROTOR_REQUEST = Envelope(
     "/build_rotor",
     Field("project", dict, default={}),
+    Field("figure", bool, default=True),
 )
 
 # `key` names the subject a request belongs to -- one card on the screen. The
@@ -148,4 +153,61 @@ EXPORT_REQUEST = Envelope(
 ROSS_FILE_REQUEST = Envelope(
     "/load_ross_file",
     Field("content", str, required=True),
+)
+
+# Two projects and, for each, the rotor models its saved analyses were computed
+# under. The conversions travel as the raw list and not as a verdict computed on
+# the screen: `domain/concatenation.model_of` is what reads them, so the three
+# answers it distinguishes -- no analyses at all, one model, several -- are
+# decided in one place and tested in Python. The frontend's `unanimousConversion`
+# folds the first two together, which is right for the export and wrong here.
+CONCATENATE_REQUEST = Envelope(
+    "/api/rotor/concatenate",
+    Field("first", dict, required=True),
+    Field("second", dict, required=True),
+    Field("first_conversions", list, default=[]),
+    Field("second_conversions", list, default=[]),
+)
+
+
+# Splitting one shaft in two. `index` is the position of the element in the
+# project's own shaft list -- not a node -- because that is what the button in
+# the modelling list has in its hand, and `offset` travels as a string because
+# it is what someone typed: the refusal for '4 0 0' belongs in the domain, with
+# the other refusals, and not in a JSON parser that would have turned it into
+# nothing on the way here.
+# The element list's filter compares a field's values in one unit, and only
+# pint knows every unit the forms accept -- including what was typed into
+# "Others". Each item is what was typed, the unit beside it and the unit to
+# answer in (`domain/conversion.to_unit`).
+UNITS_REQUEST = Envelope(
+    "/api/units/convert",
+    Field("items", list, required=True),
+)
+
+# Discretizing the shaft line (domain/meshing.py), one of three ways: by the
+# length-to-diameter rule ("ratio", `max_ld`), in a number of parts per element
+# ("parts", `parts`), or by the convergence of the lowest `n_modes` natural
+# frequencies to `rtol` % at `speed` rpm ("convergence"). Every number travels
+# as text, like the split's offset, so that a word typed into the dialog is
+# refused by name; `indexes` are the shaft rows asked for, none meaning every
+# shaft (the convergence always takes the whole rotor).
+MESH_REQUEST = Envelope(
+    "/api/rotor/mesh_shafts",
+    Field("project", dict, required=True),
+    Field("method", str, default="ratio"),
+    Field("max_ld", str, default="0.5"),
+    Field("min_ld", str, default="0.1"),
+    Field("parts", str, default="2"),
+    Field("n_modes", str, default="6"),
+    Field("rtol", str, default="0.1"),
+    Field("speed", str, default="0"),
+    Field("indexes", list, default=[]),
+)
+
+SPLIT_REQUEST = Envelope(
+    "/api/rotor/split_shaft",
+    Field("project", dict, required=True),
+    Field("index", int, required=True),
+    Field("offset", str, required=True),
 )

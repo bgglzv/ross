@@ -13,7 +13,39 @@ import { themedLayout } from '../core/theme.js';
 import { t } from '../core/i18n.js';
 import { analysisFieldsFor, analysisTitle, analysisTitles, analysisUnsupported, schemaReady, unitAlternativesFor } from '../core/schema.js';
 import { isModeShape, wireModeShapeClick, prepareModeShapePanels } from './campbell.js';
-import { switchScreen } from './screens.js';
+import { onScreenShown, switchScreen } from './screens.js';
+import { probeChoices } from '../core/probes.js';
+// One analysis card. It used to be written out three times -- creating a card,
+// restoring the saved ones, loading a file -- with the same header and the
+// same four buttons in each, so a change to a button had three places to be
+// forgotten in. The ids (`card-`, `body-`, `plot-`, `icon-`) are what the rest
+// of this module finds the card by.
+//
+// The buttons carry the card and the analysis as `data-card` and `data-type`
+// (core/actions.js). Update, Help and Delete sit inside the header, which
+// folds the card when clicked; the action listener runs only the nearest
+// named element, so they no longer need `event.stopPropagation()` to keep a
+// click on them from also folding the card.
+function cardHTML(uniqueId, type, titleHTML, controlsHTML) {
+    return `
+        <div class="analysis-card" id="card-${uniqueId}">
+            <div class="analysis-header" data-action="toggle-card" data-card="${uniqueId}">
+                <span class="analysis-title">${titleHTML}</span>
+                <div class="analysis-actions">
+                    <button class="btn-update-analysis" data-action="run-card" data-card="${uniqueId}" data-type="${type}"><i class="fas fa-sync-alt"></i> ${escapeHtml(t('update'))}</button>
+                    <button class="btn-help-analysis" data-action="card-help" data-type="${type}"><i class="fas fa-question-circle"></i> ${escapeHtml(t('help'))}</button>
+                    <button class="btn-delete-analysis" data-action="delete-card" data-card="${uniqueId}"><i class="fas fa-trash"></i> ${escapeHtml(t('delete'))}</button>
+                    <span id="icon-${uniqueId}"><i class="fas fa-chevron-down"></i></span>
+                </div>
+            </div>
+            <div class="analysis-body" id="body-${uniqueId}">
+                <div id="plot-${uniqueId}" style="min-height: 400px; display: block; width: 100%; overflow: hidden; position:relative;"></div>
+                ${controlsHTML}
+            </div>
+        </div>
+    `;
+}
+
 // Rebuilds the analysis charts on the screen from memory.
 //
 // Asynchronous since slice 4: the fields come from the server, and assembling the
@@ -26,7 +58,6 @@ export async function restoreAnalysesFromMemory(savedArray) {
     savedArray.slice().reverse().forEach(an => {
         const uniqueId = Date.now() + Math.random().toString().slice(2,8);
         const nid = 'plot-' + uniqueId;
-        const cardId = 'card-' + uniqueId;
         let controlsHTML = '';
         
         if(an.type && an.params) {
@@ -41,23 +72,8 @@ export async function restoreAnalysesFromMemory(savedArray) {
         }                
         
         let typeVal = an.type || 'campbell';                
-        container.insertAdjacentHTML('afterbegin', `
-            <div class="analysis-card" id="${cardId}">
-                <div class="analysis-header" onclick="toggleAnalysis('${uniqueId}')">
-                    <span class="analysis-title">${escapeHtml(an.title)} ${conversionBadge(an.conversion)}</span>
-                    <div class="analysis-actions">
-                        <button class="btn-update-analysis" onclick="event.stopPropagation(); runCardAnalysis('${uniqueId}', '${typeVal}')"><i class="fas fa-sync-alt"></i> ${escapeHtml(t('update'))}</button>
-                        <button class="btn-help-analysis" onclick="openAnalysisCardHelp(event, '${typeVal}')"><i class="fas fa-question-circle"></i> ${escapeHtml(t('help'))}</button>
-                        <button class="btn-delete-analysis" onclick="deleteAnalysis(event, '${cardId}')"><i class="fas fa-trash"></i> ${escapeHtml(t('delete'))}</button>
-                        <span id="icon-${uniqueId}"><i class="fas fa-chevron-down"></i></span>
-                    </div>
-                </div>
-                <div class="analysis-body" id="body-${uniqueId}">
-                    <div id="${nid}" style="min-height: 400px; display: block; width: 100%; overflow: hidden; position:relative;"></div>
-                    ${controlsHTML}
-                </div>
-            </div>
-        `);                
+        container.insertAdjacentHTML('afterbegin', cardHTML(uniqueId, typeVal,
+            `${escapeHtml(an.title)} ${conversionBadge(an.conversion)}`, controlsHTML));
         
         const divNode = document.getElementById(nid);
         registerAnalysis(uniqueId, an.type, an.title || 'Analysis', an.conversion);
@@ -80,9 +96,36 @@ export async function restoreAnalysesFromMemory(savedArray) {
 
 // Global probe builders
 
-const generateProbeRowHTML = function(uniqueId, id, type, node=0, dof=0) {
+// The tables whose rows can name a probe of the model instead of being typed
+// (domain/probe_refs.py `PROBE_TABLES`): the probes of the response plots,
+// and the outputs of the frequency response -- where the machine has its
+// probes. Not the inputs: an input is a force on a degree of freedom, not a
+// measurement.
+const MODEL_PROBE_FIELDS = new Set(['probes', 'outs']);
+
+// The choice of a probe of the model, for a row that can name one: '' when
+// the model has none and the row names none, which leaves the row as it
+// always was. `probe` is the id the row names; one the model no longer has is
+// shown as missing, still chosen, rather than dropped in silence.
+function modelProbePicker(probe) {
+    const choices = state.projectData ? probeChoices(state.projectData) : [];
+    const named = String(probe || '');
+    if (!choices.length && !named) return { picker: '', named };
+    const options = choices.map(choice => `<option value="${escapeHtml(choice.id)}"${choice.id === named ? ' selected' : ''}>`
+        + `${escapeHtml(choice.label)}</option>`).join('');
+    const missing = named && !choices.some(choice => choice.id === named)
+        ? `<option value="${escapeHtml(named)}" selected>${escapeHtml(t('probeMissing'))}</option>` : '';
+    const picker = `<select class="probe-ref" data-action="pick-model-probe" title="${escapeHtml(t('probeFromModelHint'))}">`
+        + `<option value="">${escapeHtml(t('probeTyped'))}</option>${options}${missing}</select>`;
+    return { picker, named };
+}
+
+const generateProbeRowHTML = function(uniqueId, id, type, node=0, dof=0, probe='') {
+    const { picker, named } = MODEL_PROBE_FIELDS.has(id) ? modelProbePicker(probe) : { picker: '', named: '' };
     return `
-    <div class="probe-row" style="align-items:center;">
+    <div class="probe-row${picker ? ' has-model-probes' : ''}" style="align-items:center;">
+        ${picker}
+        <span class="probe-typed"${named ? ' hidden' : ''}>
         <span style="font-size:11px; color:var(--text-muted);">${escapeHtml(t('probeNode'))}</span> 
         <input type="number" class="probe-node" value="${node}" min="0">
         <span style="font-size:11px; color:var(--text-muted); margin-left:8px;">${escapeHtml(t('probeDof'))}</span> 
@@ -94,7 +137,8 @@ const generateProbeRowHTML = function(uniqueId, id, type, node=0, dof=0) {
             <option value="4" ${dof==4?'selected':''}>β</option>
             <option value="5" ${dof==5?'selected':''}>γ</option>
         </select>
-        <button type="button" class="btn-remove-probe" style="margin-left:auto;" onclick="this.parentElement.remove();"><i class="fas fa-times"></i></button>
+        </span>
+        <button type="button" class="btn-remove-probe" style="margin-left:auto;" data-action="remove-row"><i class="fas fa-times"></i></button>
     </div>`;
 }
 
@@ -122,7 +166,7 @@ const generateForceRowHTML = function(uniqueId, id, type, node=0, dof=0, func="1
                 <option value="4" ${dof==4?'selected':''}>β</option>
                 <option value="5" ${dof==5?'selected':''}>γ</option>
             </select>
-            <button type="button" class="btn-remove-probe" style="margin-left:auto;" onclick="this.parentElement.parentElement.remove();"><i class="fas fa-times"></i></button>
+            <button type="button" class="btn-remove-probe" style="margin-left:auto;" data-action="remove-row"><i class="fas fa-times"></i></button>
         </div>
         <div style="display:flex; gap:6px; align-items:center;">
             <span style="font-size:11px; color:var(--text-muted);">${escapeHtml(t('probeForce'))}</span> 
@@ -146,7 +190,7 @@ const generateUnbalanceRowHTML = function(uniqueId, id, type, node=0, mag=0.01, 
         <div style="display:flex; gap:6px; align-items:center;">
             <span style="font-size:11px; color:var(--text-muted);">${escapeHtml(t('probeNode'))}</span> 
             <input type="number" class="unb-node" value="${node}" min="0">
-            <button type="button" class="btn-remove-probe" style="margin-left:auto;" onclick="this.parentElement.parentElement.remove();"><i class="fas fa-times"></i></button>
+            <button type="button" class="btn-remove-probe" style="margin-left:auto;" data-action="remove-row"><i class="fas fa-times"></i></button>
         </div>
         <div style="display:flex; gap:6px; align-items:center;">
             <span style="font-size:11px; color:var(--text-muted);">${escapeHtml(t('probeMag'))}</span> 
@@ -165,15 +209,57 @@ export const addUnbalanceRow = function(uniqueId, id, type) {
 }
 
 // Angle Probe generators (Node + Angle)
-const generateAngleProbeRowHTML = function(uniqueId, id, type, node=0, angle=0) {
+//
+// When the model has probes (core/probes.js), a row can name one of them
+// instead: then its node and angle are the model's, read by the server on
+// every run, and the typed pair is put away. `probe` is the id a row names,
+// '' for a typed row; a probe the model no longer has is shown as missing,
+// rather than dropped in silence, and the run says so.
+const generateAngleProbeRowHTML = function(uniqueId, id, type, node=0, angle=0, probe='') {
+    const { picker, named } = modelProbePicker(probe);
     return `
-    <div class="probe-row" style="align-items:center;">
+    <div class="probe-row${picker ? ' has-model-probes' : ''}" style="align-items:center;">
+        ${picker}
+        <span class="probe-typed"${named ? ' hidden' : ''}>
         <span style="font-size:11px; color:var(--text-muted);">${escapeHtml(t('probeNode'))}</span> 
         <input type="number" class="probe-node" value="${node}" min="0">
         <span style="font-size:11px; color:var(--text-muted); margin-left:8px;">${escapeHtml(t('probeAngle'))}</span> 
-        <input type="number" class="probe-angle" value="${angle}" step="0.01">
-        <button type="button" class="btn-remove-probe" style="margin-left:auto;" onclick="this.parentElement.remove();"><i class="fas fa-times"></i></button>
+        <input type="number" class="probe-angle" value="${angle ?? 0}" step="0.01">
+        </span>
+        <button type="button" class="btn-remove-probe" style="margin-left:auto;" data-action="remove-row"><i class="fas fa-times"></i></button>
     </div>`;
+}
+
+// A probe of the model chosen in a row, or the row typed again.
+export function pickModelProbe(select) {
+    const row = select.closest('.probe-row');
+    const typed = row && typeof row.querySelector === 'function' ? row.querySelector('.probe-typed') : null;
+    if (typed) typed.hidden = !!select.value;
+}
+
+// The rows of every card drawn again with the probes the model has now: a
+// card drawn before a probe was added, renamed or deleted on the modelling
+// screen would offer the old ones. What each row says is kept.
+export function refreshProbeChoices() {
+    document.querySelectorAll('[id^="angle-probe-container-"] .probe-row').forEach(row => {
+        const ref = row.querySelector('.probe-ref');
+        const node = row.querySelector('.probe-node');
+        const angle = row.querySelector('.probe-angle');
+        row.outerHTML = generateAngleProbeRowHTML('', '', '',
+            node ? node.value : 0, angle ? angle.value : 0, ref ? ref.value : '');
+    });
+    document.querySelectorAll('[id^="probe-container-outs-"] .probe-row').forEach(row => {
+        const ref = row.querySelector('.probe-ref');
+        const node = row.querySelector('.probe-node');
+        const dof = row.querySelector('.probe-dof');
+        row.outerHTML = generateProbeRowHTML('', 'outs', '',
+            node ? node.value : 0, dof ? dof.value : 0, ref ? ref.value : '');
+    });
+}
+
+// Called once from main.js.
+export function startProbeChoices() {
+    onScreenShown('screen-analysis', refreshProbeChoices);
 }
 
 // Function to add a probe
@@ -190,7 +276,9 @@ export const toggleDashAdv = function(btn) {
         btn.innerHTML = btn.dataset.textOriginal + ' <i class="fas fa-chevron-down"></i>';
     } else {
         container.style.display = 'grid';
-        btn.innerHTML = 'Hide ' + btn.dataset.textOriginal + ' <i class="fas fa-chevron-up"></i>';
+        // `hide` and not a literal 'Hide ': the Portuguese screen said "Hide
+        // Análise avançada".
+        btn.innerHTML = escapeHtml(t('hide')) + ' ' + btn.dataset.textOriginal + ' <i class="fas fa-chevron-up"></i>';
     }
 };
 
@@ -233,21 +321,21 @@ export function buildDashboardHTML(uniqueId, type, configOverride) {
             : `class="dash-control-group"`;
         
         if (item.type === 'probe_list' || item.type === 'force_list' || item.type === 'unbalance_list' || item.type === 'angle_probe_list') {
-            let btnFunc = 'addProbeRow'; let contId = 'probe';
-            if (item.type === 'force_list') { btnFunc = 'addForceRow'; contId = 'force'; }
-            else if (item.type === 'unbalance_list') { btnFunc = 'addUnbalanceRow'; contId = 'unb'; }
-            else if (item.type === 'angle_probe_list') { btnFunc = 'addAngleProbeRow'; contId = 'angle-probe'; }
+            let contId = 'probe';
+            if (item.type === 'force_list') contId = 'force';
+            else if (item.type === 'unbalance_list') contId = 'unb';
+            else if (item.type === 'angle_probe_list') contId = 'angle-probe';
             
             html += `<div ${depsAttr} style="flex-direction: column; align-items: stretch; grid-column: 1 / -1;">
                 <div style="display:flex; justify-content:space-between; align-items: center; width:100%; margin-bottom:8px;">
                     <label style="margin:0;">${item.label}</label>
-                    <button type="button" class="btn-add-probe" onclick="${btnFunc}('${uniqueId}', '${item.id}', '${type}')"><i class="fas fa-plus"></i></button>
+                    <button type="button" class="btn-add-probe" data-action="add-row" data-list="${item.type}" data-card="${uniqueId}" data-field="${item.id}" data-type="${type}"><i class="fas fa-plus"></i></button>
                 </div>
                 <div class="probe-list-container" id="${contId}-container-${item.id}-${uniqueId}">`;
             
-            if (item.type === 'probe_list') item.val.forEach(v => { html += generateProbeRowHTML(uniqueId, item.id, type, v.node, v.dof); });
+            if (item.type === 'probe_list') item.val.forEach(v => { html += generateProbeRowHTML(uniqueId, item.id, type, v.node, v.dof, v.probe); });
             else if (item.type === 'force_list') item.val.forEach(v => { html += generateForceRowHTML(uniqueId, item.id, type, v.node, v.dof, v.func); });
-            else if (item.type === 'angle_probe_list') item.val.forEach(v => { html += generateAngleProbeRowHTML(uniqueId, item.id, type, v.node, v.angle); });
+            else if (item.type === 'angle_probe_list') item.val.forEach(v => { html += generateAngleProbeRowHTML(uniqueId, item.id, type, v.node, v.angle, v.probe); });
             else item.val.forEach(v => { html += generateUnbalanceRowHTML(uniqueId, item.id, type, v.node, v.mag, v.phase); });
             
             html += `</div></div>`;
@@ -257,32 +345,12 @@ export function buildDashboardHTML(uniqueId, type, configOverride) {
             
             let activeUnit = item.saved_unit || item.default_unit;
 
-            if (item.type === 'range') {
-                html += `<div style="display: flex; align-items: center; gap: 10px; width: 100%;">`;                
-                html += `<input type="range" id="range-${item.id}-${uniqueId}" min="${item.min}" max="${item.max}" step="${item.step}" value="${item.val}" oninput="document.getElementById('num-${item.id}-${uniqueId}').value = this.value;" style="flex: 1; margin: 0;">`;
-                html += `<div class="unified-input" style="width: 140px; flex-shrink: 0;">`;
-                html += `<input type="number" id="num-${item.id}-${uniqueId}" value="${item.val}" oninput="document.getElementById('range-${item.id}-${uniqueId}').value = this.value;">`;
-                
-                const alternatives = unitAlternativesFor(item.default_unit);
-                if (item.default_unit && alternatives) {
-                    html += `<select id="unit-${item.id}-${uniqueId}" class="unified-unit" data-prev="${activeUnit}" onchange="handleUnitChange(this)">`;
-                    let addedOpts = new Set();
-                    alternatives.forEach(u => {
-                        let sel = (u === activeUnit) ? 'selected' : '';
-                        html += `<option value="${u}" ${sel}>${u}</option>`;
-                        addedOpts.add(u);
-                    });
-                    if (activeUnit && !addedOpts.has(activeUnit)) html += `<option value="${activeUnit}" selected>${activeUnit}</option>`;
-                    html += `<option value="Others">${escapeHtml(t('others'))}</option></select>`;
-                }
-                html += `</div></div>`;
-
-            } else if (item.type === 'select') {
+            if (item.type === 'select') {
                 let isUnit = item.id.includes('unit');
-                let changeEvent = (item.id === 'plot_type' || item.id === 'coupling') ? `onchange="checkDeps('${uniqueId}')"` : ``;            
+                let changeEvent = (item.id === 'plot_type' || item.id === 'coupling') ? `data-action="check-deps" data-card="${uniqueId}"` : ``;            
                 
                 if (isUnit) {
-                    changeEvent = `onchange="handleUnitChange(this)" data-prev="${item.val}"`;
+                    changeEvent = `data-action="change-unit" data-prev="${item.val}"`;
                 }
 
                 html += `<select id="input-${item.id}-${uniqueId}" style="width: 100%;" ${changeEvent}>`;
@@ -305,7 +373,7 @@ export function buildDashboardHTML(uniqueId, type, configOverride) {
                 
                 const alternatives = unitAlternativesFor(item.default_unit);
                 if (item.default_unit && alternatives) {
-                    html += `<select id="unit-${item.id}-${uniqueId}" class="unified-unit" data-prev="${activeUnit}" onchange="handleUnitChange(this)">`;
+                    html += `<select id="unit-${item.id}-${uniqueId}" class="unified-unit" data-prev="${activeUnit}" data-action="change-unit">`;
                     let addedOpts = new Set();
                     alternatives.forEach(u => {
                         let sel = (u === activeUnit) ? 'selected' : '';
@@ -327,8 +395,8 @@ export function buildDashboardHTML(uniqueId, type, configOverride) {
 
     let finalHtml = `<div class="light-dashboard-controls">${htmlStandard}`;
     
-    if (htmlAdvAnalysis) finalHtml += `<div style="grid-column: 1 / -1;"><button type="button" class="btn-adv-dash" data-text-original="${escapeHtml(t('advancedAnalysis'))}" onclick="toggleDashAdv(this)">${escapeHtml(t('advancedAnalysis'))} <i class="fas fa-chevron-down"></i></button><div class="adv-dash-container">${htmlAdvAnalysis}</div></div>`;
-    if (htmlAdvPlot) finalHtml += `<div style="grid-column: 1 / -1;"><button type="button" class="btn-adv-dash" data-text-original="${escapeHtml(t('advancedPlot'))}" onclick="toggleDashAdv(this)">${escapeHtml(t('advancedPlot'))} <i class="fas fa-chevron-down"></i></button><div class="adv-dash-container" id="adv-plot-${uniqueId}">${htmlAdvPlot}</div></div>`;
+    if (htmlAdvAnalysis) finalHtml += `<div style="grid-column: 1 / -1;"><button type="button" class="btn-adv-dash" data-text-original="${escapeHtml(t('advancedAnalysis'))}" data-action="toggle-dash-advanced">${escapeHtml(t('advancedAnalysis'))} <i class="fas fa-chevron-down"></i></button><div class="adv-dash-container">${htmlAdvAnalysis}</div></div>`;
+    if (htmlAdvPlot) finalHtml += `<div style="grid-column: 1 / -1;"><button type="button" class="btn-adv-dash" data-text-original="${escapeHtml(t('advancedPlot'))}" data-action="toggle-dash-advanced">${escapeHtml(t('advancedPlot'))} <i class="fas fa-chevron-down"></i></button><div class="adv-dash-container" id="adv-plot-${uniqueId}">${htmlAdvPlot}</div></div>`;
     
     finalHtml += '</div>';
     setTimeout(() => { checkDeps(uniqueId); }, 100);
@@ -346,8 +414,7 @@ export function toggleAnalysis(uniqueId) {
 
 // Function to delete the analysis
 
-export async function deleteAnalysis(event, cardId) {
-    event.stopPropagation();
+export async function deleteAnalysis(cardId) {
     let isConfirmed = await openCustomConfirm(t('confirmDeleteDashboard'));
     if (isConfirmed) {
         document.getElementById(cardId).remove();
@@ -390,31 +457,14 @@ export async function addAnalysis(event) {
     const badge = conversionBadge(conversionType);
 
     const uniqueId = Date.now() + Math.random().toString().slice(2,8);
-    const plotId = 'plot-' + uniqueId;
-    const cardId = 'card-' + uniqueId;
     const list = document.getElementById('analysis-list');
     if(list.innerHTML.includes('dashboards-empty')) list.innerHTML = '';
     const title = analysisTitle(type);
     registerAnalysis(uniqueId, type, title, conversionType);
     const controlsHTML = buildDashboardHTML(uniqueId, type);
     
-    list.insertAdjacentHTML('afterbegin', `
-        <div class="analysis-card" id="${cardId}">
-            <div class="analysis-header" onclick="toggleAnalysis('${uniqueId}')">
-                <span class="analysis-title"><i class="fas fa-chart-line"></i> ${escapeHtml(title)} ${badge}</span>
-                <div class="analysis-actions">
-                    <button class="btn-update-analysis" onclick="event.stopPropagation(); runCardAnalysis('${uniqueId}', '${type}')"><i class="fas fa-sync-alt"></i> ${escapeHtml(t('update'))}</button>
-                    <button class="btn-help-analysis" onclick="openAnalysisCardHelp(event, '${type}')"><i class="fas fa-question-circle"></i> ${escapeHtml(t('help'))}</button>
-                    <button class="btn-delete-analysis" onclick="deleteAnalysis(event, '${cardId}')"><i class="fas fa-trash"></i> ${escapeHtml(t('delete'))}</button>
-                    <span id="icon-${uniqueId}"><i class="fas fa-chevron-down"></i></span>
-                </div>
-            </div>
-            <div class="analysis-body" id="body-${uniqueId}">
-                <div id="${plotId}" style="min-height: 400px; width: 100%; overflow: hidden; position:relative;"></div>
-                ${controlsHTML}
-            </div>
-        </div>
-    `);
+    list.insertAdjacentHTML('afterbegin', cardHTML(uniqueId, type,
+        `<i class="fas fa-chart-line"></i> ${escapeHtml(title)} ${badge}`, controlsHTML));
     runCardAnalysis(uniqueId, type);
 }
 
@@ -432,10 +482,15 @@ export function cardParameters(uniqueId, type) {
             const container = document.getElementById(`probe-container-${item.id}-${uniqueId}`);
             const probes = [];
             container.querySelectorAll('.probe-row').forEach(row => {
-                probes.push({
+                const typed = {
                     node: parseInt(row.querySelector('.probe-node').value) || 0,
                     dof: parseInt(row.querySelector('.probe-dof').value) || 0
-                });
+                };
+                // An output of the frequency response can be a probe of the
+                // model, read from it by the server (domain/probe_refs.py).
+                const ref = row.querySelector('.probe-ref');
+                if (ref && ref.value) typed.probe = ref.value;
+                probes.push(typed);
             });
             p[item.id] = probes;
         } else if (item.type === 'force_list') {
@@ -464,16 +519,17 @@ export function cardParameters(uniqueId, type) {
             const container = document.getElementById(`angle-probe-container-${item.id}-${uniqueId}`);
             const angleList = [];
             container.querySelectorAll('.probe-row').forEach(row => {
-                angleList.push({
+                const typed = {
                     node: parseInt(row.querySelector('.probe-node').value) || 0,
                     angle: parseFloat(row.querySelector('.probe-angle').value) || 0
-                });
+                };
+                // A probe of the model, by its id: the server reads its node and
+                // angle from the model (domain/probe_refs.py).
+                const ref = row.querySelector('.probe-ref');
+                if (ref && ref.value) typed.probe = ref.value;
+                angleList.push(typed);
             });
             p[item.id] = angleList;
-        } else if (item.type === 'range') {
-            p[item.id] = document.getElementById(`num-${item.id}-${uniqueId}`).value;
-            const unitEl = document.getElementById(`unit-${item.id}-${uniqueId}`);
-            if (unitEl) p[item.id + '_unit'] = unitEl.value;
         } else if (item.type === 'number') {
             p[item.id] = document.getElementById(`input-${item.id}-${uniqueId}`).value;
             const unitEl = document.getElementById(`unit-${item.id}-${uniqueId}`);
@@ -692,7 +748,7 @@ function inviteToRecompute(card, uniqueId, type) {
         + `<i class="fas fa-rotate"></i>`
         + `<p>${escapeHtml(t('chartNotKept'))}</p>`
         + `<button class="btn-analysis-go" type="button" `
-        + `onclick="runCardAnalysis('${uniqueId}', '${type}')">`
+        + `data-action="run-card" data-card="${uniqueId}" data-type="${type}">`
         + `${escapeHtml(t('recalculate'))}</button>`
         + `</div>`;
 }
@@ -711,7 +767,6 @@ export function loadAnalysis(event) {
             loaded.reverse().forEach(an => {
                 const uniqueId = Date.now() + Math.random().toString().slice(2,8);
                 const nid = 'plot-' + uniqueId;
-                const cardId = 'card-' + uniqueId;
                 let controlsHTML = '';
                 if(an.type && an.params) {
                     const config = analysisFieldsFor(an.type);
@@ -724,23 +779,9 @@ export function loadAnalysis(event) {
                     }
                 }                
                 let typeVal = an.type || 'campbell';                
-                container.insertAdjacentHTML('afterbegin', `
-                    <div class="analysis-card" id="${cardId}">
-                        <div class="analysis-header" onclick="toggleAnalysis('${uniqueId}')">
-                            <span class="analysis-title">${escapeHtml(an.title)} ${escapeHtml(t('loadedSuffix'))} ${conversionBadge(an.conversion)}</span>
-                            <div class="analysis-actions">
-                                <button class="btn-update-analysis" onclick="event.stopPropagation(); runCardAnalysis('${uniqueId}', '${typeVal}')"><i class="fas fa-sync-alt"></i> ${escapeHtml(t('update'))}</button>
-                                <button class="btn-help-analysis" onclick="openAnalysisCardHelp(event, '${typeVal}')"><i class="fas fa-question-circle"></i> ${escapeHtml(t('help'))}</button>
-                                <button class="btn-delete-analysis" onclick="deleteAnalysis(event, '${cardId}')"><i class="fas fa-trash"></i> ${escapeHtml(t('delete'))}</button>
-                                <span id="icon-${uniqueId}"><i class="fas fa-chevron-down"></i></span>
-                            </div>
-                        </div>
-                        <div class="analysis-body" id="body-${uniqueId}">
-                            <div id="${nid}" style="min-height: 400px; display: block; width: 100%; overflow: hidden; position:relative;"></div>
-                            ${controlsHTML}
-                        </div>
-                    </div>
-                `);                
+                container.insertAdjacentHTML('afterbegin', cardHTML(uniqueId, typeVal,
+                    `${escapeHtml(an.title)} ${escapeHtml(t('loadedSuffix'))} ${conversionBadge(an.conversion)}`,
+                    controlsHTML));
                 const divNode = document.getElementById(nid);
                 registerAnalysis(uniqueId, an.type, an.title || 'Analysis', an.conversion);
                 recordResult(uniqueId, an.params || {}, an.conversion,

@@ -3,13 +3,15 @@
 import { openCustomConfirm, openCustomPrompt } from '../components/modals.js';
 import { analysesToSave, forgetAllAnalyses } from '../core/analysis_store.js';
 import { escapeHtml } from '../core/dom.js';
-import { ensureUIDs, state, syncMultiRotors } from '../core/state.js';
+import { ensureUIDs, openProjectHistory, state, syncMultiRotors } from '../core/state.js';
 import { saveState } from '../core/persistence.js';
+import { CATEGORIES } from '../core/project_file.js';
 import { emptyListNotice, restoreAnalysesFromMemory } from './analysis.js';
 import { generatePythonFile } from './export.js';
-import { buildRotorLive } from './modeling.js';
+import { buildRotorLive, closeForm } from './modeling.js';
 import { switchScreen } from './screens.js';
 import { t } from '../core/i18n.js';
+import { forgetFilters } from '../core/list_filter.js';
 // Function to open the Hub screen and render the list
 
 export function openRotorHub() {
@@ -43,10 +45,7 @@ export function renderRotorHub() {
         if (rotor.isMultiRotor) {
             badge = `<span class="badge-conversion badge-multirotor"><i class="fas fa-link"></i> MultiRotor</span>`;
         } else {
-            let s_len = rotor.shafts ? rotor.shafts.length : 0;
-            let d_len = rotor.disks ? rotor.disks.length : 0;
-            let b_len = rotor.bearings ? rotor.bearings.length : 0;
-            badge = `<span style="font-size:11px; color:var(--text-muted); font-weight:normal; margin-left:8px;">(${s_len + d_len + b_len} elements)</span>`;
+            badge = `<span style="font-size:11px; color:var(--text-muted); font-weight:normal; margin-left:8px;">(${escapeHtml(elementsLabel(elementCount(rotor)))})</span>`;
         }
 
         container.innerHTML += `
@@ -54,21 +53,21 @@ export function renderRotorHub() {
                 <div class="hub-card-top">
                     <div class="hub-card-title">
                         <i class="${rotor.isMultiRotor ? 'fas fa-link' : 'fas fa-cogs'}"></i> 
-                        <span style="cursor:pointer;" onclick="editRotorName(${index})" title="${escapeHtml(t('editName'))}">
+                        <span style="cursor:pointer;" data-action="rename-rotor" data-index="${index}" title="${escapeHtml(t('editName'))}">
                             ${escapeHtml(name)} <i class="fas fa-pen" style="font-size:11px; color:var(--text-muted); margin-left:4px;"></i>
                         </span> 
                         ${badge}
                     </div>
                     <div class="hub-card-actions">
-                        <button class="btn-action copy" onclick="copyRotorInHub(${index})" title="${escapeHtml(t('copy'))}"><i class="fas fa-copy"></i></button>
-                        <button class="btn-action delete" onclick="deleteRotorInHub(${index})" title="${escapeHtml(t('delete'))}"><i class="fas fa-trash"></i></button>
+                        <button class="btn-action copy" data-action="copy-rotor" data-index="${index}" title="${escapeHtml(t('copy'))}"><i class="fas fa-copy"></i></button>
+                        <button class="btn-action delete" data-action="delete-rotor" data-index="${index}" title="${escapeHtml(t('delete'))}"><i class="fas fa-trash"></i></button>
                     </div>
                 </div>
                 <div class="hub-card-bottom">
-                    <button class="btn-primary" onclick="openRotorWorkspace(${index}, 'screen-modeling')"><i class="fas fa-tools"></i> ${escapeHtml(t('goToModeling'))}</button>
-                    <button class="btn-secondary" onclick="openRotorWorkspace(${index}, 'screen-analysis')"><i class="fas fa-chart-line"></i> ${escapeHtml(t('goToAnalysis'))}</button>
-                    <button class="btn-secondary" onclick="saveRotorFromHub(${index})"><i class="fas fa-save"></i> ${escapeHtml(t('saveJson'))}</button>
-                    <button class="btn-secondary" onclick="generatePythonFromHub(${index})"><i class="fab fa-python"></i> ${escapeHtml(t('generatePython'))}</button>
+                    <button class="btn-primary" data-action="open-rotor" data-index="${index}" data-screen="screen-modeling"><i class="fas fa-tools"></i> ${escapeHtml(t('goToModeling'))}</button>
+                    <button class="btn-secondary" data-action="open-rotor" data-index="${index}" data-screen="screen-analysis"><i class="fas fa-chart-line"></i> ${escapeHtml(t('goToAnalysis'))}</button>
+                    <button class="btn-secondary" data-action="save-rotor-file" data-index="${index}"><i class="fas fa-save"></i> ${escapeHtml(t('saveJson'))}</button>
+                    <button class="btn-secondary" data-action="export-rotor-python" data-index="${index}"><i class="fab fa-python"></i> ${escapeHtml(t('generatePython'))}</button>
                 </div>
             </div>
         `;
@@ -100,7 +99,7 @@ export async function createNewRotorInHub() {
     let newRotor = {
         name: baseName,
         savedAnalyses: [],
-        materials: [], shafts: [], disks: [], gears: [], couplings: [], seals: [], bearings: [], pointmasses: []
+        materials: [], shafts: [], disks: [], gears: [], couplings: [], seals: [], bearings: [], pointmasses: [], probes: []
     };
     state.rotorLibrary.push(newRotor);
     renderRotorHub();
@@ -134,8 +133,26 @@ export function openRotorWorkspace(index, targetScreen) {
 
     state.activeRotorIndex = index;
     state.projectData = state.rotorLibrary[index]; 
+
+    // A fresh history, and it starts holding this rotor rather than nothing:
+    // the first change records *this* model as the step to come back to.
+    // Undoing across this boundary would restore one rotor over another.
+    //
+    // `openProjectHistory` and not `resetHistory`: it announces, and the
+    // buttons have to hear it. See the comment beside it in core/state.js.
+    openProjectHistory(state.projectData);
+    showOpenRotorName();
     
-    state.editingIndex = -1;    
+    // The form closes with the rotor it was editing: `closeForm` hides the
+    // window and sets `editingIndex` to -1, so the next rotor does not open
+    // with a form for an element of the last one. (It also used to lift the
+    // form out of the list before the list was emptied -- the form lived there,
+    // and emptying the list with it inside deleted it from the page, very
+    // likely the "lists vanished" of the week's report. The form is a window of
+    // its own now, and cannot be emptied away.)
+    closeForm();
+    // Filters are the last rotor's: its materials and fields, not this one's.
+    forgetFilters();
     document.getElementById('element-list').innerHTML = '';
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
     
@@ -175,12 +192,6 @@ export function openRotorWorkspace(index, targetScreen) {
     }
 }
 
-// Saves the analyses to memory before returning to the Hub
-
-export function returnToHub() {
-    openRotorHub();
-}
-
 // Saves the JSON directly from the Hub
 
 export function saveRotorFromHub(index) {
@@ -206,4 +217,36 @@ export function generatePythonFromHub(index) {
         .filter(a => a && a.type && Object.keys(a.params || {}).length > 0)
         .map(a => ({ type: a.type, params: a.params, conversion: a.conversion || '' }));
     return generatePythonFile(rotor, saved);
+}
+
+
+// Which rotor is on the modelling screen, in its topbar.
+//
+// It was not shown anywhere before, which is a gap you only notice once there
+// is an undo button: "undo" is a question about a particular model, and the
+// screen was not saying which one.
+// Every element of a rotor, whatever its kind. It used to add up shafts, disks
+// and bearings only, so a rotor with gears, couplings, seals or point masses
+// was announced with fewer elements than it had. Materials are not elements of
+// the rotor -- they are what the shafts are made of -- and stay out, as do the
+// probes: ROSS's rotor has none, they are where the analyses read it.
+// "1 element", not "1 elements".
+function elementsLabel(count) {
+    return (count === 1 ? t('elementsCountOne') : t('elementsCount')).replace('%1', () => count);
+}
+
+function elementCount(rotor) {
+    return CATEGORIES
+        .filter(category => category !== 'materials' && category !== 'probes')
+        .reduce((total, category) => total + (Array.isArray(rotor[category]) ? rotor[category].length : 0), 0);
+}
+
+export function showOpenRotorName() {
+    const label = document.getElementById('modeling-rotor-name');
+    if (!label) return;
+    const name = (state.projectData && state.projectData.name) || '';
+    label.textContent = name ? ' \u2014 ' + name : '';
+    // A long name is cut with an ellipsis in the header; the whole of it is
+    // one hover away.
+    label.title = name;
 }
