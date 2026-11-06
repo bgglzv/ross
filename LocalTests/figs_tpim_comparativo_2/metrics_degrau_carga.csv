@@ -1,0 +1,5 @@
+Ensaio,Cenário,settling_time_s,steady_state_error,overshoot_pct,n_crossings,convergence
+Degrau de carga - Torque,Inversor V/F,0.17525000000000013,0.002496968674396527,-93.83056096708582,23,converges
+Degrau de carga - Torque,Inversor FOC,0.020260000000000167,0.0010488338597198776,-50.565554671973445,1592,converges
+Degrau de carga - Velocidade,Inversor V/F,inf,-12.226454197054991,-12.979553526541824,0,does_not_settle
+Degrau de carga - Velocidade,Inversor FOC,0.0,-0.00712410128697627,-0.05042380722789538,0,converges

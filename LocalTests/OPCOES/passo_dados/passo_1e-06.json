@@ -1,11 +1,11 @@
 {
-  "pct_total": 24.856533333333335,
-  "pct_rampa": 6.579430897601466,
-  "pct_regime_vazio": 57.563182527301095,
-  "pct_apos_carga": 14.810456793028804,
-  "razao_maxima": 97.10789117976213,
+  "pct_total": 29.320733333333333,
+  "pct_rampa": 5.200847758883694,
+  "pct_regime_vazio": 52.21552862114485,
+  "pct_apos_carga": 27.322381785078807,
+  "razao_maxima": 19.652023131403826,
   "passo": 1e-06,
-  "conjugado_minimo": -13.847801667162404,
-  "conjugado_maximo": 25.023042156273448,
-  "corrente_pico_a": 19.908454761568933
+  "conjugado_minimo": -16.794726207279854,
+  "conjugado_maximo": 23.33739438773099,
+  "corrente_pico_a": 27.886257101764077
 }

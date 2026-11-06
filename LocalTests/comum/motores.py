@@ -27,6 +27,9 @@ class Simulacao:
     time_step_dol: float    # passo interno do acionamento direto (sem chaveamento)
     zoom_antes: float       # janela de zoom antes da carga [s]
     zoom_depois: float      # janela de zoom depois da carga [s]
+    rampa_foc: float = None # rampa de referência do FOC (curta: o limite de
+                            # corrente, não a rampa, deve moldar a aceleração,
+                            # como na partida direta). None = usa `rampa`.
 
     def vetor_tempo(self):
         return np.arange(0.0, self.tf + self.dt, self.dt)
@@ -43,19 +46,21 @@ SIM_PEQUENO = Simulacao(
     time_step_dol=1e-5,
     zoom_antes=0.1,
     zoom_depois=0.2,
+    rampa_foc=None,
 )
 
 SIM_GRANDE = Simulacao(
     nome="Motor de grande porte (M-C-5283001)",
-    tf=24.0,
+    tf=20.0,
     dt=1e-3,
-    t_carga=16.0,
+    t_carga=13.0,
     rampa=8.0,
     frequencia_chaveamento=Q_(5000.0, "Hz"),
     time_step=None,
     time_step_dol=1e-4,
     zoom_antes=0.5,
     zoom_depois=1.0,
+    rampa_foc=None,
 )
 
 FREQ_REFERENCIA_HZ = 60.0
