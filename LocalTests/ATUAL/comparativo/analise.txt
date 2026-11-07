@@ -1,0 +1,7 @@
+Conclusao: os resultados de BW_v5 e BW_v6 sao identicos bit a bit entre OLD e ATUAL. Os 20 casos (2 versoes x 2 motores x 5 frequencias) tiveram todos os 100 vetores comparados (t, velocidade, conjugado, iq, id) exatamente iguais, e todas as diferencas de ripple sao 0,00 p.p.
+
+Por que nao houve mudanca: a biblioteca OLD ja incluia a correcao de unidade de frequency_s (rad/s para Hz) feita localmente, e a mesma correcao entrou na feature-motor de jguarato (commit 0595bda7). As classes InverterFOCv2/v5/v6 sobrescrevem os ganhos de iqs e ids e o get_current_state, usando frequency_s/(2*pi) diretamente, e o resto da biblioteca (kp_w, ki_w, SVPWM, integracao) nao mudou numericamente. As demais alteracoes de jguarato (renomeio inverters para motor_drive, nominal para rated, time_range nos graficos, steady_state, aviso do numba) nao afetam os sinais simulados.
+
+Adaptacao necessaria no ATUAL: apenas nomes (ross.motors.inverters para ross.motors.motor_drive e Is_nom para Is_rated). Nenhuma logica foi alterada.
+
+Observacao: os numeros OLD x ATUAL coincidem com os do relatorio BW_v6 original; portanto as conclusoes daquele estudo (v6 neutro em MIT_P, 20-35% menos ripple de id/torque em MIT_G a 55-62 Hz) continuam validas sobre a biblioteca atual.
