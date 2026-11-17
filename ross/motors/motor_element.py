@@ -895,6 +895,7 @@ class MotorElement(Element):
         load_torque_ratio=1.0,
         time_ramp=0.6667,
         frequency_ref=None,
+        inverter_options=None,
     ):
         """Simulate motor with V/f adjustment technique.
 
@@ -923,6 +924,13 @@ class MotorElement(Element):
         frequency_ref : float or pint.Quantity, optional
             Reference frequency for V/f adjustment technique [rad/s].
             If None, uses half the motor rated frequency.
+        inverter_options : dict, optional
+            Extra keyword arguments of the V/f inverter: ``frequency_max``
+            (maximum frequency [rad/s]; the voltage stays at its rated value
+            above the rated frequency), ``voltage_boost`` (phase voltage peak at
+            zero frequency [V]) and ``overmodulation`` (Bose overmodulation of
+            the SVPWM, default True). Default is None, which keeps the inverter
+            defaults.
 
         Returns
         -------
@@ -949,6 +957,20 @@ class MotorElement(Element):
         ...     frequency_ref=Q_(30.0, "Hz")
         ... )
 
+        Operation above the rated frequency, with a voltage boost at low
+        frequency:
+
+        >>> results = motor.run_with_inverter_vf(
+        ...     t,
+        ...     frequency_s=Q_(5000, "Hz"),
+        ...     time_step=1e-4,
+        ...     frequency_ref=Q_(66.0, "Hz"),
+        ...     inverter_options={
+        ...         "frequency_max": Q_(66.0, "Hz"),
+        ...         "voltage_boost": 20.0,
+        ...     },
+        ... )
+
         Time domain plots
         >>> fig1 = results.plot_torque()
         >>> fig2 = results.plot_speed()
@@ -972,6 +994,7 @@ class MotorElement(Element):
             frequency_rated=self.frequency_rated,
             time_ramp=time_ramp,
             frequency_ref=float(frequency_ref or self.frequency_rated / 2),
+            **(inverter_options or {}),
         )
 
         results = self.run(
@@ -994,6 +1017,7 @@ class MotorElement(Element):
         time_ramp=1.0,
         frequency_s=None,
         frequency_ref=None,
+        inverter_options=None,
     ):
         """Simulate motor with an inverter under indirect Field-Oriented Control.
 
@@ -1027,6 +1051,14 @@ class MotorElement(Element):
         frequency_ref : float or pint.Quantity, optional
             Synchronous electrical frequency reference [rad/s].
             If None, uses half the motor rated frequency.
+        inverter_options : dict, optional
+            Extra keyword arguments of the FOC inverter: ``frequency_max``
+            (maximum frequency [rad/s]), ``field_weakening`` (flux reduced as
+            1/w above the rated frequency), ``flux_programming``,
+            ``flux_min_ratio`` and ``flux_time_constant`` (magnetizing current
+            that follows the load) and ``overmodulation`` (Bose overmodulation
+            of the SVPWM, default True). Default is None, which keeps the
+            inverter defaults.
 
         Returns
         -------
@@ -1085,6 +1117,7 @@ class MotorElement(Element):
             Ip_motor=self.Ip_motor,
             time_ramp=time_ramp,
             frequency_ref=float(frequency_ref or self.frequency_rated / 2),
+            **(inverter_options or {}),
         )
 
         results = self.run(

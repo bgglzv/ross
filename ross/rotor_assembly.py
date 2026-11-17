@@ -5182,6 +5182,7 @@ class Rotor(object):
         time_step=None,
         time_ramp=0.6667,
         frequency_ref=None,
+        inverter_options=None,
         steady_state=True,
         F=None,
         verbose=False,
@@ -5260,6 +5261,16 @@ class Rotor(object):
             reference when `drive_mode='VFD_FOC'`.
             Active only when `drive_mode` is ``'VFD_VF'`` or ``'VFD_FOC'``.
             Default is None, which uses half the motor rated frequency.
+        inverter_options : dict, optional
+            Extra keyword arguments passed to the inverter when `drive_mode` is
+            ``'VFD_VF'`` or ``'VFD_FOC'``. Both accept ``frequency_max``
+            [rad/s] and ``overmodulation`` (Bose overmodulation of the SVPWM,
+            default True). ``'VFD_VF'`` also accepts ``voltage_boost`` [V], and
+            ``'VFD_FOC'`` accepts ``field_weakening``, ``flux_programming``,
+            ``flux_min_ratio`` and ``flux_time_constant``. See
+            :py:meth:`ross.MotorElement.run_with_inverter_vf` and
+            :py:meth:`ross.MotorElement.run_with_inverter_foc`.
+            Default is None.
         steady_state : bool, optional
             If True (default), only the last third of the interval after
             `load_torque_entrance_time` is integrated, skipping the motor
@@ -5343,6 +5354,7 @@ class Rotor(object):
                 time_step=time_step,
                 time_ramp=time_ramp,
                 frequency_ref=frequency_ref,
+                inverter_options=inverter_options,
             )
         elif drive_mode.upper() == "VFD_FOC":
             motor_results = motor.run_with_inverter_foc(
@@ -5353,6 +5365,7 @@ class Rotor(object):
                 time_step=time_step,
                 time_ramp=time_ramp,
                 frequency_ref=frequency_ref,
+                inverter_options=inverter_options,
             )
         else:
             raise ValueError("drive_mode must be 'DOL', 'VFD_VF' or 'VFD_FOC'.")

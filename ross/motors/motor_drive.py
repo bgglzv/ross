@@ -19,6 +19,7 @@ import numpy as np
 
 from ross.units import check_units, Q_
 
+from .overmodulation import bose_vector
 from .results import PhaseResults
 from .utils import clarke_transform, inverse_clarke_transform, park_transform
 
@@ -386,6 +387,11 @@ class Inverter:
     frequency_ref : float or pint.Quantity, optional
         Reference electrical frequency [rad/s]. Default is half the
         rated frequency.
+    overmodulation : bool, optional
+        If True, the reference voltage above the linear limit ``Vdc / sqrt(3)`` is
+        synthesized with the Bose overmodulation, modes I and II up to six-step
+        operation. If False, the dwell times are only rescaled on the hexagon.
+        Default is True.
     """
 
     def __init__(
@@ -396,6 +402,7 @@ class Inverter:
         frequency_rated,
         time_ramp=0.6667,
         frequency_ref=None,
+        overmodulation=True,
     ):
 
         self.voltage_dc = voltage_dc
@@ -406,6 +413,7 @@ class Inverter:
         self.frequency_rated = float(frequency_rated)
         self.time_ramp = float(time_ramp)
         self.frequency_ref = float(frequency_ref or frequency_rated / 2)
+        self.overmodulation = bool(overmodulation)
 
         # Switching SVPWM table, shared by every inverter implemented in this module.
         # Each column represents the states of the upper switches for the space
@@ -425,22 +433,23 @@ class Inverter:
         self.V0 = 1
         self.V7 = 8
 
-    def _svpwm(self, t, va_ref, vb_ref, vc_ref):
-        """Synthesize phase voltages via Space Vector PWM modulation.
+    def _duty_cycles(self, va_ref, vb_ref, vc_ref):
+        """Compute the duty cycles of the three phases for a reference voltage.
 
         Parameters
         ----------
-        t : float
-            Time [s].
         va_ref, vb_ref, vc_ref : float
             Reference three-phase voltages [V].
 
         Returns
         -------
-        van, vbn, vcn : float
-            Instantaneous phase voltages [V].
+        numpy.ndarray
+            Duty cycles of phases a, b and c in the interval [0, 1].
         """
         v_alpha, v_beta = clarke_transform(va_ref, vb_ref, vc_ref)
+
+        if self.overmodulation:
+            v_alpha, v_beta, _ = bose_vector(v_alpha, v_beta, self.voltage_dc)
 
         # Space vector and SVPWM hexagon sector
         vr = np.sqrt(v_alpha**2 + v_beta**2)
@@ -463,8 +472,10 @@ class Inverter:
 
         eps = np.finfo(float).eps
 
-        # Correction for overmodulation conditions
-        if M > 0.907 and M <= 1:
+        # Correction for overmodulation conditions (only without Bose overmodulation)
+        if self.overmodulation:
+            T0 = max(T0, 0)
+        elif M > 0.907 and M <= 1:
             # Region I (0.907 < M ≤ 1)
             T0 = max(T0, 0)
             factor = self.Ts / (T0 + T1 + T2 + eps)
@@ -514,7 +525,24 @@ class Inverter:
 
         # Duty cycles - clamping values within the [0, 1] interval
         t_seq = np.array([T0 / 2, T1, T2, T0 / 2])
-        D = np.clip((S_bits @ t_seq) / self.Ts, 0, 1)
+        return np.clip((S_bits @ t_seq) / self.Ts, 0, 1)
+
+    def _svpwm(self, t, va_ref, vb_ref, vc_ref):
+        """Synthesize phase voltages via Space Vector PWM modulation.
+
+        Parameters
+        ----------
+        t : float
+            Time [s].
+        va_ref, vb_ref, vc_ref : float
+            Reference three-phase voltages [V].
+
+        Returns
+        -------
+        van, vbn, vcn : float
+            Instantaneous phase voltages [V].
+        """
+        D = self._duty_cycles(va_ref, vb_ref, vc_ref)
 
         # Carrier synchronized with the switching period
         carrier = self._get_carrier(t)
@@ -578,6 +606,15 @@ class InverterVF(Inverter):
     frequency_ref : float or pint.Quantity, optional
         Reference frequency for V/f adjustment [rad/s]. Default is half
         the rated frequency.
+    frequency_max : float or pint.Quantity, optional
+        Maximum operating frequency [rad/s]. Above the rated frequency the voltage
+        stays at the rated value (field weakening). Default is the rated frequency.
+    voltage_boost : float, optional
+        Phase voltage peak at zero frequency [V], which compensates the stator
+        resistance drop at low frequency. The voltage grows linearly from this
+        value to the rated value at the rated frequency. Default is 0.
+    overmodulation : bool, optional
+        See :class:`Inverter`. Default is True.
 
     References
     ----------
@@ -620,6 +657,9 @@ class InverterVF(Inverter):
         frequency_rated,
         time_ramp=0.6667,
         frequency_ref=None,
+        frequency_max=None,
+        voltage_boost=0.0,
+        overmodulation=True,
     ):
 
         super().__init__(
@@ -629,7 +669,11 @@ class InverterVF(Inverter):
             frequency_rated,
             time_ramp,
             frequency_ref,
+            overmodulation,
         )
+
+        self.frequency_max = float(frequency_max or self.frequency_rated)
+        self.voltage_boost = float(voltage_boost)
 
         # Rated phase voltage peak value
         self.voltage_phase_peak_rated = (voltage_rated / np.sqrt(3)) * np.sqrt(2)
@@ -653,11 +697,40 @@ class InverterVF(Inverter):
             Peak phase voltage [V], saturated at rated value.
         """
         # Peak value of the phase voltage proportional to the V/f ratio
-        Vp = self.voltage_phase_peak_rated * (frequency / self.frequency_rated)
+        Vp = self.voltage_boost + (
+            self.voltage_phase_peak_rated - self.voltage_boost
+        ) * (frequency / self.frequency_rated)
 
         # Saturation at the rated value
         Vp = min(Vp, self.voltage_phase_peak_rated)
         return Vp
+
+    def get_flux_angle(self, t, frequency, theta_0=0.0):
+        """Return the flux angle, the time integral of the frequency.
+
+        While the frequency ramps linearly from zero, its integral is
+        ``frequency * t / 2``. Once the ramp ends and the frequency is held
+        constant, the angle grows as ``frequency * (t - time_ramp / 2)``, which
+        is continuous with the ramp expression at ``t = time_ramp``.
+
+        Parameters
+        ----------
+        t : float
+            Current simulation time [s].
+        frequency : float
+            Operating frequency at time `t` [rad/s], as returned by
+            :py:meth:`get_frequency`.
+        theta_0 : float, optional
+            Initial flux angle [rad]. Default is 0.
+
+        Returns
+        -------
+        float
+            Flux angle [rad].
+        """
+        if t <= self.time_ramp:
+            return theta_0 + frequency * t / 2
+        return theta_0 + frequency * (t - self.time_ramp / 2)
 
     def get_phase_voltages(self, t, frequency, theta_0):
         """Generate three-phase voltages using SVPWM modulation.
@@ -686,8 +759,7 @@ class InverterVF(Inverter):
         # Reference peak voltage
         Vp = self.speed_control(frequency)
 
-        # Reference voltages
-        theta = theta_0 + frequency * t
+        theta = self.get_flux_angle(t, frequency, theta_0)
         va_ref = Vp * np.sin(theta)
         vb_ref = Vp * np.sin(theta - 2 * np.pi / 3)
         vc_ref = Vp * np.sin(theta + 2 * np.pi / 3)
@@ -718,7 +790,7 @@ class InverterVF(Inverter):
         if frequency_ref is None:
             frequency_ref = self.frequency_ref
 
-        fref = min(max(frequency_ref, 0), self.frequency_rated)
+        fref = min(max(frequency_ref, 0), self.frequency_max)
 
         f_curr = self.f_0 + fref / self.time_ramp * t
         f_curr = min(f_curr, fref)
@@ -804,6 +876,25 @@ class InverterFOC(Inverter):
     frequency_ref : float or pint.Quantity, optional
         Synchronous electrical frequency reference [rad/s]. Default is
         half the rated frequency.
+    frequency_max : float or pint.Quantity, optional
+        Maximum synchronous electrical frequency [rad/s]. Default is the
+        rated frequency.
+    field_weakening : bool, optional
+        If True, the flux reference decreases as 1/w above the rated
+        frequency. Default is False.
+    flux_programming : bool, optional
+        If True, the magnetizing current reference follows the load: it is
+        reduced when |iqs_ref| is small and returns to the rated value as
+        |iqs_ref| approaches its rated value. Default is False.
+    flux_min_ratio : float, optional
+        Lower bound of the programmed flux, as a fraction of the rated
+        magnetizing current. Default is 0.3.
+    flux_time_constant : float, optional
+        Time constant [s] of the first-order filter applied to the
+        programmed magnetizing current. Default is the rotor time constant.
+    overmodulation : bool, optional
+        If True, the SVPWM uses Bose overmodulation up to six-step operation.
+        Default is True.
 
     Notes
     -----
@@ -834,6 +925,12 @@ class InverterFOC(Inverter):
         Ip_motor,
         time_ramp=1.0,
         frequency_ref=None,
+        frequency_max=None,
+        field_weakening=False,
+        flux_programming=False,
+        flux_min_ratio=0.3,
+        flux_time_constant=None,
+        overmodulation=True,
     ):
 
         super().__init__(
@@ -843,10 +940,20 @@ class InverterFOC(Inverter):
             frequency_rated,
             time_ramp,
             frequency_ref,
+            overmodulation,
         )
 
         self.np_pairs = n_poles / 2
         self.speed_rated = float(speed_rated)
+        self.field_weakening = bool(field_weakening)
+        self.flux_programming = bool(flux_programming)
+        self.flux_min_ratio = float(flux_min_ratio)
+        self.frequency_max = float(frequency_max or self.frequency_rated)
+        self.speed_max = (
+            self.speed_rated
+            if frequency_max is None
+            else max(self.speed_rated, self.frequency_max / self.np_pairs)
+        )
 
         self.Rs = float(stator_resistance)
         self.Rr = float(rotor_resistance)
@@ -901,6 +1008,12 @@ class InverterFOC(Inverter):
         self.Lsline = (
             self.Lss - (self.Lm**2) / self.Lrr
         )  # Equivalent leakage inductance
+
+        # Torque-producing current at rated load, reference for the flux programming
+        self.iqs_rated = float(np.sqrt(max(self.Is_rated**2 - self.ids_ref**2, 1e-12)))
+        self.flux_time_constant = float(
+            self.taur if flux_time_constant is None else flux_time_constant
+        )
         self.kp_iqs = 2 * np.pi * self.Lsline * BWp_iqs
 
     def initialize_control_state(self, dt, theta_0=0.0):
@@ -924,6 +1037,8 @@ class InverterFOC(Inverter):
             "theta": theta_0,
             "carrier_index": 1,
             "n_samples": max(1, int(round(self.Ts / dt))),
+            "w_sync": 0.0,
+            "ids_programmed": self.ids_ref,
         }
 
     def _get_carrier(self, t):
@@ -971,7 +1086,7 @@ class InverterFOC(Inverter):
             frequency_ref = self.frequency_ref
 
         wref_mech = frequency_ref / self.np_pairs
-        wref = min(max(wref_mech, 0), self.speed_rated)
+        wref = min(max(wref_mech, 0), self.speed_max)
 
         w_ramp = wref / self.time_ramp * t
         w_ramp = min(w_ramp, wref)
@@ -1023,11 +1138,27 @@ class InverterFOC(Inverter):
         iqs_max = 3.0 * self.Is_rated
         iqs_ref = np.clip(iqs_ref_unsat, -iqs_max, iqs_max)
 
+        # Flux reference, reduced as 1/w above the rated frequency (field weakening)
+        ids_ref = self.ids_ref
+        if self.field_weakening:
+            w_elec = max(abs(state["w_sync"]), self.np_pairs * abs(rotor_speed))
+            ids_ref *= min(1.0, self.frequency_rated / max(w_elec, 1e-9))
+
+        # Flux programmed by the load: the magnetizing current follows |iqs_ref|
+        # through a first-order filter, so the flux is not lowered abruptly
+        if self.flux_programming:
+            load_ratio = min(1.0, abs(iqs_ref) / self.iqs_rated)
+            target = self.ids_ref * max(self.flux_min_ratio, load_ratio)
+            alpha = dt / (self.flux_time_constant + dt)
+            state["ids_programmed"] += alpha * (target - state["ids_programmed"])
+            ids_ref *= state["ids_programmed"] / self.ids_ref
+
         # Slip frequency
-        wsl = (1 / self.taur) * (iqs_ref / self.ids_ref)
+        wsl = (1 / self.taur) * (iqs_ref / ids_ref)
 
         # Synchronous electrical speed
         w_sync = wsl + self.np_pairs * rotor_speed
+        state["w_sync"] = w_sync
 
         state["theta"] += w_sync * dt
 
@@ -1041,7 +1172,7 @@ class InverterFOC(Inverter):
         err_iqs = iqs_ref - iqs
         vqs_ref = self.kp_iqs * err_iqs + self.Rs * iqs + self.Lss * w_sync * ids
 
-        err_ids = self.ids_ref - ids
+        err_ids = ids_ref - ids
         state["int_err_ids"] += err_ids * dt
 
         vds_ref = (
@@ -1052,7 +1183,7 @@ class InverterFOC(Inverter):
         )
 
         # Saturation & anti-windup
-        Vmax = self.voltage_dc / np.sqrt(3)
+        Vmax = self.voltage_dc * (2 / np.pi if self.overmodulation else 1 / np.sqrt(3))
         Vref = np.sqrt(vqs_ref**2 + vds_ref**2)
 
         saturated = Vref > Vmax

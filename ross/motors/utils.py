@@ -217,6 +217,108 @@ def windowed_dfft(signal, dt):
     return freq, mag
 
 
+def _amplitude_at(signal, t, window, frequency):
+    """Return the amplitude of a windowed signal at an arbitrary frequency."""
+    phasor = np.sum(signal * window * np.exp(-2j * np.pi * frequency * t))
+    return 2 * np.abs(phasor) / np.sum(window)
+
+
+def fundamental_frequency(signal, dt, search_range=None):
+    """Estimate the fundamental frequency of a periodic signal.
+
+    The Hanning-windowed spectrum is scanned for its largest peak, which is then
+    refined by a fine frequency search around it, so that the result is not
+    limited to the frequency resolution of the FFT.
+
+    Parameters
+    ----------
+    signal : array_like
+        Time domain signal.
+    dt : float
+        Sampling interval [s].
+    search_range : tuple of float, optional
+        Lower and upper frequency [Hz] of the search. Default is None, which
+        searches from 1 Hz to the Nyquist frequency.
+
+    Returns
+    -------
+    float
+        Fundamental frequency [Hz].
+
+    Examples
+    --------
+    >>> t = np.arange(0, 1, 1e-4)
+    >>> round(fundamental_frequency(np.sin(2 * np.pi * 63.7 * t), 1e-4), 2)
+    63.7
+    """
+    signal = np.asarray(signal, dtype=float)
+    signal = signal - signal.mean()
+    freq, mag = windowed_dfft(signal, dt)
+    low, high = search_range or (1.0, freq[-1])
+    valid = (freq >= low) & (freq <= high)
+    f_peak = freq[valid][np.argmax(mag[valid])]
+
+    t = np.arange(len(signal)) * dt
+    window = np.hanning(len(signal))
+    df = freq[1] - freq[0]
+    grid = np.linspace(f_peak - df, f_peak + df, 201)
+    amplitudes = [_amplitude_at(signal, t, window, f) for f in grid]
+    return float(grid[int(np.argmax(amplitudes))])
+
+
+def total_harmonic_distortion(signal, dt, frequency=None, n_harmonics=50):
+    """Compute the total harmonic distortion of a periodic signal.
+
+    The amplitude of each harmonic is evaluated at the exact multiple of the
+    fundamental frequency, with a Hanning window. The distortion is the root sum
+    of squares of the harmonics from 2 to `n_harmonics`, divided by the
+    amplitude of the fundamental. Components that are not multiples of the
+    fundamental, such as the switching frequency sidebands of an inverter, are
+    not counted.
+
+    Parameters
+    ----------
+    signal : array_like
+        Time domain signal. It should span several periods of the fundamental.
+    dt : float
+        Sampling interval [s].
+    frequency : float, optional
+        Fundamental frequency [Hz]. Default is None, which estimates it with
+        :py:func:`fundamental_frequency`.
+    n_harmonics : int, optional
+        Highest harmonic order included. Default is 50.
+
+    Returns
+    -------
+    thd : float
+        Total harmonic distortion, as a ratio of the fundamental (0.1 is 10 %).
+    frequency : float
+        Fundamental frequency used [Hz].
+
+    Examples
+    --------
+    A 60 Hz signal with a 5th harmonic of 10 % of the fundamental:
+
+    >>> t = np.arange(0, 1, 1e-4)
+    >>> signal = np.sin(2 * np.pi * 60 * t) + 0.1 * np.sin(2 * np.pi * 300 * t)
+    >>> thd, f1 = total_harmonic_distortion(signal, 1e-4, frequency=60.0)
+    >>> round(thd, 3), f1
+    (0.1, 60.0)
+    """
+    signal = np.asarray(signal, dtype=float)
+    signal = signal - signal.mean()
+    if frequency is None:
+        frequency = fundamental_frequency(signal, dt)
+
+    t = np.arange(len(signal)) * dt
+    window = np.hanning(len(signal))
+    fundamental = _amplitude_at(signal, t, window, frequency)
+    nyquist = 0.5 / dt
+    orders = [k for k in range(2, n_harmonics + 1) if k * frequency < nyquist]
+    harmonics = [_amplitude_at(signal, t, window, k * frequency) for k in orders]
+    return float(np.sqrt(np.sum(np.square(harmonics))) / fundamental), float(frequency)
+
+
 @njit
 def rk4_step(func, dt, y0, args):
     """Perform a single Runge-Kutta 4 (RK4) integration step.
