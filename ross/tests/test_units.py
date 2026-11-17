@@ -1,6 +1,9 @@
 import pickle
+import subprocess
+import sys
 from collections import namedtuple
 
+import numpy as np
 import pytest
 from numpy.testing import assert_allclose
 
@@ -13,6 +16,45 @@ def test_new_units_loaded():
     # check if h is hour instead of planck constant
     v = Q_(3600, "m/h")
     assert v.to("m/s").m == 1
+
+
+@pytest.mark.parametrize(
+    "value, unit", [(150, "Hz"), (150, "hertz"), (0.15, "kHz"), (0.15, "kilohertz")]
+)
+def test_hz_is_revolutions_per_second(value, unit):
+    # pint defines hertz as 1/s, which converts 1 Hz to 1 rad/s
+    assert_allclose(Q_(value, unit).to("rpm").m, 9000)
+    assert_allclose(Q_(1, "Hz").to("rad/s").m, 2 * np.pi)
+
+
+def test_hz_label():
+    assert str(Q_(1, "hertz").units) == "Hz"
+    assert f"{Q_(1, 'Hz'):~P}" == "1 Hz"
+
+
+def test_new_units_loaded_into_existing_registry():
+    # another library (e.g. ccp) may set the application registry before
+    # ross is imported; ross must still load its definitions into it
+    code = (
+        "import pint\n"
+        "pint.set_application_registry(pint.UnitRegistry())\n"
+        "from ross.units import Q_\n"
+        "assert Q_ is pint.get_application_registry().Quantity\n"
+        "print('RESULT', Q_(150, 'Hz').to('rpm').m, Q_(1, 'pkpk').to('').m,"
+        " Q_(1, 'cv').to('W').m)\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True, check=True
+    )
+    # importing ross may print other messages (e.g. CoolProp when REFPROP
+    # cannot be loaded), so read only the result line
+    line = next(
+        line for line in result.stdout.splitlines() if line.startswith("RESULT ")
+    )
+    hz_rpm, pkpk, cv = map(float, line.split()[1:])
+    assert_allclose(hz_rpm, 9000)
+    assert_allclose(pkpk, 0.5)
+    assert_allclose(cv, 735.49875)
 
 
 def test_units_pickle():
@@ -234,3 +276,24 @@ def test_unit_Q_conversion(auxiliary_function):
     results_dict = {k: v for k, v in zip(arguments.keys(), results, strict=True)}
     for arg, actual in results_dict.items():
         assert_allclose(actual, arguments[arg].expected_converted_value)
+
+
+@pytest.mark.parametrize("option", ["major", "minor", "wd", "wn", "x", "3"])
+def test_check_units_passes_strings_through(option):
+    @check_units
+    def func(angle, frequency_type=None, speed=None):
+        return angle, frequency_type, speed
+
+    assert func(option, frequency_type=option, speed=option) == (option,) * 3
+
+
+def test_string_options_reach_the_rotor_methods():
+    from ross import Probe, rotor_example
+
+    assert Probe(3, "major").angle == "major"
+    assert Probe(3, "minor").angle == "minor"
+
+    rotor = rotor_example()
+    campbell = rotor.run_campbell(np.linspace(0, 100, 3), frequency_type="wn")
+    modal = rotor.run_modal(speed=100)
+    assert_allclose(campbell.wd[-1], np.sort(modal.wn)[:6])

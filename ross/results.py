@@ -55,6 +55,10 @@ __all__ = [
 # Define reference circle for orbits
 NUM_POINTS = 360
 CIRCLE = np.exp(1j * np.linspace(0, 2 * np.pi, NUM_POINTS, endpoint=False))
+# A circular orbit drawn through 10 samples of one revolution (9 chords) stays
+# within 1 - cos(pi / 9), about 6 %, of its radius; fewer samples do not show
+# the orbit shape.
+MIN_WINDOW_SAMPLES = 10
 
 
 class Results(ABC):
@@ -473,6 +477,11 @@ class Shape(Results):
     normalize : bool, optional
         If True the vector is normalized.
         Default is False.
+    center_line_pos : list, optional
+        Lateral position of the center line of each node (m). When the nodes lie on
+        different center lines, as in a multi-rotor, the 3D plot draws each center
+        line side by side, spaced by the shape amplitude.
+        Default is None, which places every node on the same center line.
     """
 
     def __init__(
@@ -483,8 +492,10 @@ class Shape(Results):
         shaft_elements_length,
         number_dof,
         normalize=False,
+        center_line_pos=None,
     ):
         self.vector = vector
+        self.center_line_pos = center_line_pos
         self.nodes = nodes
         self.nodes_pos = nodes_pos
         self.shaft_elements_length = shaft_elements_length
@@ -511,6 +522,8 @@ class Shape(Results):
         self.yn = None
         self.zn = None
         self.major_axis = None
+        self.node_offsets = np.zeros(len(nodes_pos))
+        self.center_line_offsets = np.zeros(1)
         self._classify()
 
         if number_dof > 3:
@@ -618,6 +631,14 @@ class Shape(Results):
 
             n_div, get_node_index, _ = self._fix_mode_shape_intersections()
 
+            if self.center_line_pos is None:
+                center_line_rank = np.zeros(len(nodes_pos), dtype=int)
+            else:
+                center_line_rank = np.unique(
+                    np.round(self.center_line_pos, 9), return_inverse=True
+                )[1]
+            point_rank = np.zeros(shape, dtype=int)
+
             n0 = 0
             e0 = 0
             k = 0
@@ -652,6 +673,7 @@ class Shape(Results):
                     xn[pos0:pos1] = Nx @ evec[xx].real
                     yn[pos0:pos1] = Ny @ evec[yy].real
                     zn[pos0:pos1] = (node_pos * onn + Le * zeta).reshape(nn)
+                    point_rank[pos0:pos1] = center_line_rank[n]
 
                     # major axes calculation
                     xn_complex[pos0:pos1] = Nx @ evec[xx]
@@ -675,6 +697,13 @@ class Shape(Results):
                 n0 = n1
                 e0 = e1
 
+            spacing = 6 * np.max(major)
+            reference = center_line_rank[0] * spacing
+            self.center_line_offsets = (
+                np.arange(center_line_rank.max() + 1) * spacing - reference
+            )
+            self.node_offsets = center_line_rank * spacing - reference
+            self.yc_n = point_rank * spacing - reference
             self.xn = xn
             self.yn = yn
             self.zn = zn
@@ -1165,8 +1194,8 @@ class Shape(Results):
                             name=f"Node {self.nodes[n]}",
                             hovertemplate=(
                                 "Nodal position: %{y:.2f}<br>"
-                                + "X - Displacement: %{x:.2f}<br>"
-                                + "Y - Displacement: %{z:.2f}<br>"
+                                + "X - Displacement: %{x:.2e}<br>"
+                                + "Y - Displacement: %{z:.2e}<br>"
                                 + f"Relative angle: {theta[n]:.2f}"
                             ),
                             legendgroup=legend_name,
@@ -1329,7 +1358,7 @@ class Shape(Results):
                         line=dict(color=self.color),
                         customdata=Q_(self.angle_0[n0:n1], "rad").to(phase_units).m,
                         hovertemplate=(
-                            f"Displacement: %{{y:.2f}}<br>"
+                            f"Displacement: %{{y:.2e}}<br>"
                             + f"Angle {phase_units}: %{{customdata:.2f}}"
                         ),
                         name=f"{orientation}",
@@ -1434,21 +1463,24 @@ class Shape(Results):
             for orbit in self.orbits:
                 zc_pos = np.repeat(orbit.node_pos, len(orbit.x_circle))
                 zc_pos = Q_(zc_pos, "m").to(length_units).m
+                offset = self.node_offsets[orbit.node]
+                y_circle = orbit.y_circle + offset
 
                 # add orbit point
                 orbit_data.append(
                     go.Scatter3d(
                         y=[zc_pos[i]],
                         x=[orbit.x_circle[i]],
-                        z=[orbit.y_circle[i]],
+                        z=[y_circle[i]],
+                        customdata=[orbit.y_circle[i]],
                         mode="markers",
                         marker=dict(color=orbit.color),
                         name="node {}".format(orbit.node),
                         showlegend=False,
                         hovertemplate=(
                             "Nodal Position: %{y:.2f}<br>"
-                            + "X - Displacement: %{x:.2f}<br>"
-                            + "Y - Displacement: %{z:.2f}"
+                            + "X - Amplitude: %{x:.2e}<br>"
+                            + "Y - Amplitude: %{customdata:.2e}"
                         ),
                     )
                 )
@@ -1458,15 +1490,16 @@ class Shape(Results):
                         go.Scatter3d(
                             y=zc_pos[j],
                             x=orbit.x_circle[j],
-                            z=orbit.y_circle[j],
+                            z=y_circle[j],
+                            customdata=orbit.y_circle[j],
                             mode="lines",
                             line=dict(color=orbit.color, dash="dashdot"),
                             name="node {}".format(orbit.node),
                             showlegend=False,
                             hovertemplate=(
                                 "Nodal Position: %{y:.2f}<br>"
-                                + "X - Displacement: %{x:.2f}<br>"
-                                + "Y - Displacement: %{z:.2f}"
+                                + "X - Amplitude: %{x:.2e}<br>"
+                                + "Y - Amplitude: %{customdata:.2e}"
                             ),
                         )
                     )
@@ -1476,15 +1509,16 @@ class Shape(Results):
                         go.Scatter3d(
                             y=zc_pos,
                             x=orbit.x_circle,
-                            z=orbit.y_circle,
+                            z=y_circle,
+                            customdata=orbit.y_circle,
                             mode="lines",
                             line=dict(color=orbit.color),
                             name="node {}".format(orbit.node),
                             showlegend=False,
                             hovertemplate=(
                                 "Nodal Position: %{y:.2f}<br>"
-                                + "X - Displacement: %{x:.2f}<br>"
-                                + "Y - Displacement: %{z:.2f}"
+                                + "X - Amplitude: %{x:.2e}<br>"
+                                + "Y - Amplitude: %{customdata:.2e}"
                             ),
                         )
                     )
@@ -1494,7 +1528,7 @@ class Shape(Results):
                         go.Scatter3d(
                             y=[zc_pos[0]],
                             x=[orbit.major_x],
-                            z=[orbit.major_y],
+                            z=[orbit.major_y + offset],
                             mode="markers",
                             marker=dict(
                                 color="black", symbol="cross", size=4, line_width=2
@@ -1510,7 +1544,7 @@ class Shape(Results):
                             ).reshape(1, 2),
                             hovertemplate=(
                                 "Nodal Position: %{y:.2f}<br>"
-                                + "Major axis: %{customdata[0]:.2f}<br>"
+                                + "Major axis: %{customdata[0]:.2e}<br>"
                                 + "Angle: %{customdata[1]:.2f}"
                             ),
                         )
@@ -1534,7 +1568,7 @@ class Shape(Results):
                 go.Scatter3d(
                     y=zn[n0:n1],
                     x=xn[n0:n1],
-                    z=yn[n0:n1],
+                    z=yn[n0:n1] + self.yc_n[n0:n1],
                     mode="lines",
                     line=dict(color="black", dash="dash"),
                     name="mode shape",
@@ -1547,7 +1581,7 @@ class Shape(Results):
                 go.Scatter3d(
                     y=zn[n0:n1],
                     x=self.major_x[n0:n1],
-                    z=self.major_y[n0:n1],
+                    z=self.major_y[n0:n1] + self.yc_n[n0:n1],
                     mode="lines",
                     line=dict(color="black", dash="dashdot"),
                     hoverinfo="none",
@@ -1561,17 +1595,18 @@ class Shape(Results):
         # plot center line
         min_pos = min(zn) - 0.15 * abs(max(zn) - min(zn))
         max_pos = max(zn) + 0.15 * abs(max(zn) - min(zn))
-        fixed_lines.append(
-            go.Scatter3d(
-                y=[min_pos, max_pos],
-                x=[0, 0],
-                z=[0, 0],
-                mode="lines",
-                line=dict(color="black", dash="dashdot"),
-                hoverinfo="none",
-                showlegend=False,
-            ),
-        )
+        for offset in self.center_line_offsets:
+            fixed_lines.append(
+                go.Scatter3d(
+                    y=[min_pos, max_pos],
+                    x=[0, 0],
+                    z=[offset, offset],
+                    mode="lines",
+                    line=dict(color="black", dash="dashdot"),
+                    hoverinfo="none",
+                    showlegend=False,
+                ),
+            )
 
         fig.add_traces(data=[*initial_state, *fixed_lines])
 
@@ -2973,11 +3008,13 @@ class FrequencyResponseResults(Results):
     Parameters
     ----------
     freq_resp : array
-        Array with the frequency response (displacement).
+        Displacement frequency response, shape (ndof, ndof, len(speed_range)).
+        ``freq_resp[out, inp, i]`` is the response at degree of freedom ``out``
+        to a unit force at degree of freedom ``inp`` at ``speed_range[i]``.
     velc_resp : array
-        Array with the frequency response (velocity).
+        Velocity frequency response, indexed as ``freq_resp``.
     accl_resp : array
-        Array with the frequency response (acceleration).
+        Acceleration frequency response, indexed as ``freq_resp``.
     speed_range : array
         Array with the speed range in rad/s.
     number_dof : int
@@ -3017,9 +3054,9 @@ class FrequencyResponseResults(Results):
         Parameters
         ----------
         inp : int
-            Input.
+            Global degree of freedom where the unit force is applied.
         out : int
-            Output.
+            Global degree of freedom where the response is read.
         frequency_units : str, optional
             Units for the x axis.
             Default is "rad/s"
@@ -3080,7 +3117,7 @@ class FrequencyResponseResults(Results):
         fig.add_trace(
             go.Scatter(
                 x=frequency_range,
-                y=mag[inp, out, :],
+                y=mag[out, inp, :],
                 mode="lines",
                 line=dict(color=list(tableau_colors)[idx], shape=line_shape),
                 name=f"inp: node {inpn} | dof: {idof}<br>out: node {outn} | dof: {odof}",
@@ -3117,9 +3154,9 @@ class FrequencyResponseResults(Results):
         Parameters
         ----------
         inp : int
-            Input.
+            Global degree of freedom where the unit force is applied.
         out : int
-            Output.
+            Global degree of freedom where the response is read.
         frequency_units : str, optional
             Units for the x axis.
             Default is "rad/s"
@@ -3159,11 +3196,11 @@ class FrequencyResponseResults(Results):
 
         dummy_var = Q_(1, amplitude_units)
         if dummy_var.check("[length]/[force]"):
-            phase = np.angle(self.freq_resp[inp, out, :])
+            phase = np.angle(self.freq_resp[out, inp, :])
         elif dummy_var.check("[speed]/[force]"):
-            phase = np.angle(self.velc_resp[inp, out, :])
+            phase = np.angle(self.velc_resp[out, inp, :])
         elif dummy_var.check("[acceleration]/[force]"):
-            phase = np.angle(self.accl_resp[inp, out, :])
+            phase = np.angle(self.accl_resp[out, inp, :])
         else:
             raise ValueError(
                 "Not supported unit. Options are '[length]/[force]', '[speed]/[force]', '[acceleration]/[force]'"
@@ -3224,9 +3261,9 @@ class FrequencyResponseResults(Results):
         Parameters
         ----------
         inp : int
-            Input.
+            Global degree of freedom where the unit force is applied.
         out : int
-            Output.
+            Global degree of freedom where the response is read.
         frequency_units : str, optional
             Units for the x axis.
             Default is "rad/s"
@@ -3266,19 +3303,19 @@ class FrequencyResponseResults(Results):
 
         dummy_var = Q_(1, amplitude_units)
         if dummy_var.check("[length]/[force]"):
-            mag = np.abs(self.freq_resp[inp, out, :])
+            mag = np.abs(self.freq_resp[out, inp, :])
             mag = Q_(mag, "m/N").to(amplitude_units).m
-            phase = np.angle(self.freq_resp[inp, out, :])
+            phase = np.angle(self.freq_resp[out, inp, :])
             y_label = "Displacement"
         elif dummy_var.check("[speed]/[force]"):
-            mag = np.abs(self.velc_resp[inp, out, :])
+            mag = np.abs(self.velc_resp[out, inp, :])
             mag = Q_(mag, "m/s/N").to(amplitude_units).m
-            phase = np.angle(self.velc_resp[inp, out, :])
+            phase = np.angle(self.velc_resp[out, inp, :])
             y_label = "Velocity"
         elif dummy_var.check("[acceleration]/[force]"):
-            mag = np.abs(self.accl_resp[inp, out, :])
+            mag = np.abs(self.accl_resp[out, inp, :])
             mag = Q_(mag, "m/s**2/N").to(amplitude_units).m
-            phase = np.angle(self.accl_resp[inp, out, :])
+            phase = np.angle(self.accl_resp[out, inp, :])
             y_label = "Acceleration"
         else:
             raise ValueError(
@@ -3356,9 +3393,9 @@ class FrequencyResponseResults(Results):
         Parameters
         ----------
         inp : int
-            Input.
+            Global degree of freedom where the unit force is applied.
         out : int
-            Output.
+            Global degree of freedom where the response is read.
         frequency_units : str, optional
             Units for the x axis.
             Default is "rad/s"
@@ -4546,6 +4583,7 @@ class ForcedResponseResults(Results):
             nodes_pos=self.rotor.nodes_pos,
             shaft_elements_length=self.rotor.shaft_elements_length,
             number_dof=self.rotor.number_dof,
+            center_line_pos=self.rotor.center_line_pos,
         )
 
         if fig is None:
@@ -4572,12 +4610,13 @@ class ForcedResponseResults(Results):
                 x = scaled_amplitude * np.cos(phase)
                 y = scaled_amplitude * np.sin(phase)
                 z_pos = Q_(shape.nodes_pos[n], "m").to(rotor_length_units).m
+                offset = shape.node_offsets[n]
 
                 fig.add_trace(
                     go.Scatter3d(
                         y=[z_pos, z_pos],
                         x=[0, Q_(x, "m").to(amplitude_units).m],
-                        z=[0, Q_(y, "m").to(amplitude_units).m],
+                        z=[offset, offset + Q_(y, "m").to(amplitude_units).m],
                         mode="lines",
                         line=dict(color=tableau_colors["red"]),
                         legendgroup="Unbalance",
@@ -4589,7 +4628,7 @@ class ForcedResponseResults(Results):
                     go.Scatter3d(
                         y=[z_pos],
                         x=[Q_(x, "m").to(amplitude_units).m],
-                        z=[Q_(y, "m").to(amplitude_units).m],
+                        z=[offset + Q_(y, "m").to(amplitude_units).m],
                         mode="markers",
                         marker=dict(color=tableau_colors["red"], symbol="diamond"),
                         name="Unbalance",
@@ -4613,6 +4652,25 @@ class ForcedResponseResults(Results):
             ),
         )
 
+        offsets = shape.center_line_offsets
+        z_axis = dict(
+            title=dict(text=f"Amplitude y ({amplitude_units})"),
+            range=[offsets.min() - plot_range, offsets.max() + plot_range],
+            nticks=5,
+        )
+        if len(offsets) > 1:
+            ticks = np.array([-plot_range, 0, plot_range])
+            z_axis["tickvals"] = (offsets[:, None] + ticks).ravel()
+            z_axis["ticktext"] = [f"{t:.1e}" for t in np.tile(ticks, len(offsets))]
+            fig.add_annotation(
+                text="Note: center lines are spaced for display; the ticks give the amplitude of each.",
+                xref="paper",
+                yref="paper",
+                x=1,
+                y=0,
+                showarrow=False,
+            )
+
         fig.update_layout(
             scene=dict(
                 xaxis=dict(
@@ -4624,11 +4682,7 @@ class ForcedResponseResults(Results):
                     title=dict(text=f"Rotor Length ({rotor_length_units})"),
                     nticks=5,
                 ),
-                zaxis=dict(
-                    title=dict(text=f"Amplitude y ({amplitude_units})"),
-                    range=[-plot_range, plot_range],
-                    nticks=5,
-                ),
+                zaxis=z_axis,
             ),
             **kwargs,
         )
@@ -5322,14 +5376,21 @@ class SummaryResults(Results):
         bearings dataframe
     brg_forces: list
         list of reaction forces on bearings
-    nodes_pos:  list
-        list of nodes axial position
-    CG: float
-        rotor center of gravity
-    Ip: float
-        rotor total moment of inertia around the center line
-    tag: str
-        rotor's tag
+    CG: float, list
+        Axial position of the rotor center of gravity (m). A list gives one
+        value per rotor.
+    Ip: float, list
+        Rotor polar moment of inertia around the center line (kg.m²). A list
+        gives one value per rotor.
+    It: float, list
+        Rotor transverse moment of inertia around the center of gravity
+        (kg.m²). A list gives one value per rotor.
+    tag: str, list
+        Rotor tag. A list gives one value per rotor.
+    nodes: list, optional
+        First and last node of each rotor, as a list of (first, last) pairs,
+        used when CG, Ip, It and tag are lists. Default is None, which takes
+        the whole model as a single rotor.
 
     Returns
     -------
@@ -5337,7 +5398,18 @@ class SummaryResults(Results):
         The figure object with the tables plot.
     """
 
-    def __init__(self, df_shaft, df_disks, df_bearings, brg_forces, CG, Ip, It, tag):
+    def __init__(
+        self,
+        df_shaft,
+        df_disks,
+        df_bearings,
+        brg_forces,
+        CG,
+        Ip,
+        It,
+        tag,
+        nodes=None,
+    ):
         self.df_shaft = df_shaft
         self.df_disks = df_disks
         self.df_bearings = df_bearings
@@ -5346,6 +5418,7 @@ class SummaryResults(Results):
         self.Ip = Ip
         self.It = It
         self.tag = tag
+        self.nodes = nodes
 
     def plot(self, length_units="m", mass_units="kg", force_units="N"):
         """Plot the summary table.
@@ -5406,33 +5479,39 @@ class SummaryResults(Results):
             ).map("{:.3e}".format),
         }
 
-        rotor_mass = np.sum(self.df_shaft["m"]) + np.sum(self.df_disks["m"])
+        tags = np.atleast_1d(self.tag)
+        nodes = self.nodes
+        if nodes is None:
+            nodes = [(self.df_shaft["n_l"].iloc[0], self.df_shaft["n_r"].iloc[-1])]
+
+        starts, lengths, masses = [], [], []
+        for first, last in nodes:
+            shafts = self.df_shaft[
+                (self.df_shaft["n_l"] >= first) & (self.df_shaft["n_r"] <= last)
+            ]
+            disks = self.df_disks[
+                (self.df_disks["n"] >= first) & (self.df_disks["n"] <= last)
+            ]
+            starts.append(shafts["nodes_pos_l"].min())
+            lengths.append(shafts["nodes_pos_r"].max() - shafts["nodes_pos_l"].min())
+            masses.append(np.sum(shafts["m"]) + np.sum(disks["m"]))
+
+        def fmt(values, units, to_units, spec):
+            values = Q_(np.atleast_1d(values).astype(float), units).to(to_units).m
+            return [spec.format(v) for v in values]
+
         rotor_data = {
-            "Tag": [self.tag],
-            "Starting node": [self.df_shaft["n_l"].iloc[0]],
-            "Ending node": [self.df_shaft["n_r"].iloc[-1]],
-            f"Starting point ({length_units})": [
-                "{:.3f}".format(
-                    Q_(self.df_shaft["nodes_pos_l"].iloc[0], "m").to(length_units).m
-                )
-            ],
-            f"Total length ({length_units})": [
-                "{:.3f}".format(
-                    Q_(self.df_shaft["nodes_pos_r"].iloc[-1], "m").to(length_units).m
-                )
-            ],
-            f"CG ({length_units})": [
-                "{:.3f}".format(Q_(self.CG, "m").to(length_units).m)
-            ],
-            f"Ip{inertia_units_dis}": [
-                "{:.3e}".format(Q_(self.Ip, "m**2*kg").to(inertia_units).m)
-            ],
-            f"It{inertia_units_dis}": [
-                "{:.3e}".format(Q_(self.It, "m**2*kg").to(inertia_units).m)
-            ],
-            f"Rotor Mass ({mass_units})": [
-                "{:.3f}".format(Q_(rotor_mass, "kg").to(mass_units).m)
-            ],
+            "Tag": list(tags),
+            "Starting node": [first for first, _ in nodes],
+            "Ending node": [last for _, last in nodes],
+            f"Starting point ({length_units})": fmt(
+                starts, "m", length_units, "{:.3f}"
+            ),
+            f"Total length ({length_units})": fmt(lengths, "m", length_units, "{:.3f}"),
+            f"CG ({length_units})": fmt(self.CG, "m", length_units, "{:.3f}"),
+            f"Ip{inertia_units_dis}": fmt(self.Ip, "m**2*kg", inertia_units, "{:.3e}"),
+            f"It{inertia_units_dis}": fmt(self.It, "m**2*kg", inertia_units, "{:.3e}"),
+            f"Rotor Mass ({mass_units})": fmt(masses, "kg", mass_units, "{:.3f}"),
         }
 
         disk_data = {
@@ -5810,6 +5889,11 @@ class TimeResponseResults(Results):
             Cropped time values.
         yout : array
             Cropped response values.
+
+        Raises
+        ------
+        ValueError
+            If the window holds fewer than ``MIN_WINDOW_SAMPLES`` (10) samples.
         """
         time = np.array(self.t, copy=True)
         yout = np.array(self.yout, copy=True)
@@ -5829,8 +5913,8 @@ class TimeResponseResults(Results):
         elif t_initial is None:
             return time, yout
 
-        if t_initial > t_final:
-            raise ValueError("t_initial must be smaller than or equal to t_final.")
+        if t_initial >= t_final:
+            raise ValueError("t_initial must be smaller than t_final.")
 
         if t_initial < time[0] or t_final > time[-1]:
             raise ValueError(f"Time interval must be within [{time[0]}, {time[-1]}].")
@@ -5840,8 +5924,18 @@ class TimeResponseResults(Results):
         initial_index = np.searchsorted(time, t_initial - tolerance, side="left")
         final_index = np.searchsorted(time, t_final + tolerance, side="right")
 
-        if initial_index >= final_index:
-            raise ValueError("The selected time interval contains no samples.")
+        samples = final_index - initial_index
+        if samples < MIN_WINDOW_SAMPLES:
+            neighborhood = time[max(initial_index - 1, 0) : final_index + 1]
+            step = np.max(np.diff(neighborhood)) if len(neighborhood) > 1 else 0.0
+            length = t_final - t_initial
+            noun = "sample" if samples == 1 else "samples"
+            raise ValueError(
+                f"The selected window lasts {length:.4g} s and the time step is "
+                f"{step:.4g} s, so it holds {samples} {noun}; at least "
+                f"{MIN_WINDOW_SAMPLES} are needed. Use a time step of at most "
+                f"{length / (MIN_WINDOW_SAMPLES - 1):.4g} s or a longer window."
+            )
 
         return time[initial_index:final_index], yout[initial_index:final_index, :]
 
@@ -5987,7 +6081,8 @@ class TimeResponseResults(Results):
             ``t_initial`` and ``t_final`` select a time window, as numbers in
             ``time_units`` or as ``pint.Quantity`` values. ``one_revolution=True``
             selects one shaft revolution from the stored speed: the last one, or
-            the one starting at ``t_initial`` or ending at ``t_final``.
+            the one starting at ``t_initial`` or ending at ``t_final``. A window
+            with fewer than 10 samples raises a ``ValueError``.
             *See Plotly Python Figure Reference for more information.
 
         Returns
@@ -6057,7 +6152,8 @@ class TimeResponseResults(Results):
             ``t_initial`` and ``t_final`` select a time window, as numbers in
             seconds or as ``pint.Quantity`` values. ``one_revolution=True``
             selects one shaft revolution from the stored speed: the last one, or
-            the one starting at ``t_initial`` or ending at ``t_final``.
+            the one starting at ``t_initial`` or ending at ``t_final``. A window
+            with fewer than 10 samples raises a ``ValueError``.
             *See Plotly Python Figure Reference for more information.
 
         Returns
@@ -6148,7 +6244,8 @@ class TimeResponseResults(Results):
             ``t_initial`` and ``t_final`` select a time window, as numbers in
             seconds or as ``pint.Quantity`` values. ``one_revolution=True``
             selects one shaft revolution from the stored speed: the last one, or
-            the one starting at ``t_initial`` or ending at ``t_final``.
+            the one starting at ``t_initial`` or ending at ``t_final``. A window
+            with fewer than 10 samples raises a ``ValueError``.
             *See Plotly Python Figure Reference for more information.
 
         Returns
