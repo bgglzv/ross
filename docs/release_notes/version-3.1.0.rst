@@ -55,6 +55,17 @@ Guarato and Bruno Zambolini Vicente (`#1296 <https://github.com/petrobras/ross/p
   shaft elements at the motor node. With the default ``steady_state=True`` only the last third
   of the interval after ``load_torque_entrance_time`` is integrated. It returns a
   ``TimeResponseResults`` whose ``motor_results`` attribute holds the motor simulation.
+- The inverters take options through ``inverter_options``, a dictionary accepted by
+  ``run_with_inverter_vf()``, ``run_with_inverter_foc()`` and ``Rotor.run_with_motor()``. The
+  SVPWM uses the Bose overmodulation up to six-step operation, so the fundamental of the applied
+  voltage follows the reference above the linear limit (``overmodulation=True`` by default;
+  ``False`` keeps the dwell-time rescaling on the hexagon). The V/f inverter accepts
+  ``frequency_max`` and ``voltage_boost``, and its flux angle is the integral of the ramped
+  frequency. The FOC inverter accepts ``frequency_max``, ``field_weakening`` and
+  ``flux_programming`` (with ``flux_min_ratio`` and ``flux_time_constant``), which reduces the
+  magnetizing current and the stator current at no load, and its voltage limit is ``2 * Vdc / pi``
+  with the overmodulation. ``ross.motors.utils.total_harmonic_distortion()`` and
+  ``fundamental_frequency()`` compute the harmonic distortion of the simulated signals.
 - Also added: ``ShaftElement.Ktq()``, the torque stiffness matrix per unit torque, which
   ``ShaftElement.K()`` now uses for its ``torque`` term (the matrix values are unchanged);
   ``Ktq`` and ``torque`` keyword arguments of the time integration with a speed array;

@@ -97,6 +97,65 @@ results_foc = motor.run_with_inverter_foc(
 - `time_step` must resolve the SVPWM carrier: use at least 20 samples per switching period (`time_step <= 1e-5` s at 5 kHz), otherwise the carrier is aliased and the voltage is wrong.
 - FOC runs in closed loop on the motor state, so it cannot be precomputed and is slower than V/f for the same `t` and `time_step`.
 - With V/f the speed settles below synchronous because of slip; the FOC speed loop brings it back to synchronous after the load step.
+- The SVPWM uses the Bose overmodulation by default (`overmodulation=True`): the fundamental of the applied voltage follows the reference up to six-step operation. `overmodulation=False` keeps the previous hexagon clipping.
+- The FOC speed reference is limited to `speed_rated` unless `frequency_max` is given (see below).
+
+### Inverter options
+
+`inverter_options` is a dict of extra keyword arguments of the inverter, accepted by `run_with_inverter_vf`, `run_with_inverter_foc` and `Rotor.run_with_motor`. Frequencies accept `Q_(..., "Hz")`.
+
+```python
+# V/f above the rated frequency, with a voltage boost at low frequency
+results_vf = motor.run_with_inverter_vf(
+    t,
+    time_step=1e-5,
+    frequency_s=Q_(5000, "Hz"),
+    frequency_ref=Q_(66, "Hz"),
+    inverter_options={"frequency_max": Q_(66, "Hz"), "voltage_boost": 20.0},  # V
+)
+
+# FOC above the rated frequency, with field weakening and flux programming
+results_foc = motor.run_with_inverter_foc(
+    t,
+    time_step=1e-5,
+    frequency_s=Q_(5000, "Hz"),
+    frequency_ref=Q_(66, "Hz"),
+    inverter_options={
+        "frequency_max": Q_(66, "Hz"),
+        "field_weakening": True,
+        "flux_programming": True,
+    },
+)
+```
+
+| Option | Inverter | Meaning | Default |
+|--------|----------|---------|---------|
+| `overmodulation` | V/f, FOC | Bose overmodulation of the SVPWM | `True` |
+| `frequency_max` | V/f, FOC | Maximum frequency (V/f) or speed reference limit `frequency_max / (n_poles / 2)` (FOC) | rated frequency |
+| `voltage_boost` | V/f | Phase voltage peak at zero frequency [V]; grows linearly to the rated voltage at the rated frequency | `0` |
+| `field_weakening` | FOC | Flux reference reduced as `frequency_rated / frequency` above the rated frequency | `False` |
+| `flux_programming` | FOC | Magnetizing current follows the load through a first-order filter | `False` |
+| `flux_min_ratio` | FOC | Lower bound of the programmed flux, as a fraction of the rated one | `0.3` |
+| `flux_time_constant` | FOC | Filter time constant [s] | rotor time constant |
+
+- The flux reference is computed at the rated load, so with a constant flux the stator current at no load is the rated magnetizing current. `flux_programming=True` reduces it (for the example motor at 60 Hz, from 2.7 A rms to 0.8 A rms) and also reduces the torque ripple at no load.
+- The closed-loop FOC needs a finer step than the 20 samples per switching period of `time_step=1e-5` s: with a synchronous speed reference (`frequency_max=Q_(60, "Hz")`) and no load, the torque of the example motor oscillates between -13 and +12 N·m at `1e-5` s and stays within +-0.3 N·m at `2e-6` s. Use `time_step <= 2e-6` s for the FOC.
+- Without `voltage_boost`, V/f at a few hertz has a flux far below the rated one; a boost of about 20 V (phase peak) compensates the stator resistance of the example motor. At 3 Hz the voltage is smaller than the quantization of the PWM at 20 samples per period: use `time_step <= 2e-6`.
+
+### Harmonic distortion
+
+```python
+from ross.motors.utils import total_harmonic_distortion, windowed_dfft
+
+window = results_foc.t >= 2.0
+dt = float(np.median(np.diff(results_foc.t)))
+thd, f1 = total_harmonic_distortion(results_foc.currents["a"][window], dt)  # ratio, Hz
+frequency, amplitude = windowed_dfft(results_foc.currents["a"][window], dt)
+```
+
+- `total_harmonic_distortion` evaluates harmonics 2 to `n_harmonics` (default 50) at exact multiples of the fundamental, estimated from the signal when `frequency` is not given. Components that are not multiples of it, such as the switching sidebands, are not counted.
+- Use a window with several fundamental periods in steady state, and results stored with a step small enough for the highest harmonic (`results.t` of the inverters has the integration step; for `run_direct_on_line`, pass a fine `t`).
+- The THD of inverter currents depends on `time_step`: compare drives only at the same step.
 
 ### Results: `MotorResponseResults`
 
