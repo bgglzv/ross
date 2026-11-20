@@ -645,7 +645,10 @@ class MotorElement(Element):
 
         Tl_full = self.T_rated * load_torque_ratio
 
-        Rs = self.stator_resistance + self.short_circuit_resistance
+        # The V/f inverter is fed by an ideal DC link, with no additional resistance
+        Rs = self.stator_resistance
+        if not isinstance(element, InverterVF):
+            Rs += self.short_circuit_resistance
         Ip = self.Ip_motor + self.Ip_load
 
         is_closed_loop = isinstance(element, InverterFOC)
@@ -682,9 +685,12 @@ class MotorElement(Element):
                 element,
             )
         else:
-            w_shaft, vas, vbs, vcs = np.vectorize(element.get_current_state)(
-                t_simul, flux_angle_0
-            )
+            if isinstance(element, InverterVF):
+                element.initialize_control_state(dt, flux_angle_0)
+
+            w_shaft, vas, vbs, vcs = np.vectorize(
+                element.get_current_state, otypes=[float] * 4
+            )(t_simul, flux_angle_0)
 
             outputs = _run_motor_time_open_loop(
                 t_simul,
@@ -994,6 +1000,7 @@ class MotorElement(Element):
         time_ramp=1.0,
         frequency_s=None,
         frequency_ref=None,
+        ids_ref=None,
     ):
         """Simulate motor with an inverter under indirect Field-Oriented Control.
 
@@ -1027,6 +1034,9 @@ class MotorElement(Element):
         frequency_ref : float or pint.Quantity, optional
             Synchronous electrical frequency reference [rad/s].
             If None, uses half the motor rated frequency.
+        ids_ref : float, optional
+            Magnetizing (direct-axis) current reference [A]. Default is None,
+            which uses the value computed from the rated operating point.
 
         Returns
         -------
@@ -1085,6 +1095,7 @@ class MotorElement(Element):
             Ip_motor=self.Ip_motor,
             time_ramp=time_ramp,
             frequency_ref=float(frequency_ref or self.frequency_rated / 2),
+            ids_ref=ids_ref,
         )
 
         results = self.run(

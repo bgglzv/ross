@@ -15,6 +15,8 @@ Wu, B. & Narimani, M. (2016). High-Power Converters and AC Drives. Wiley.
 Novotny, D. & Lipo, T. (1996). Vector Control and Dynamics of AC Drives.
 """
 
+from functools import lru_cache
+
 import numpy as np
 
 from ross.units import check_units, Q_
@@ -364,12 +366,69 @@ class SourceAC:
         return results
 
 
+@lru_cache(maxsize=1)
+def _bose_tables():
+    """Tabulate the fundamental of the Bose overmodulation modes.
+
+    The DC link voltage is normalized to 1 V. The tables relate the modulation
+    index ``m = pi M / (2 sqrt(3))`` to the internal amplitude of mode 1 and to
+    the holding angle of mode 2.
+
+    Returns
+    -------
+    m_internal_tab, m_mode1_tab : numpy.ndarray
+        Internal amplitude and the modulation index it produces in mode 1.
+    alpha_h_tab, m_mode2_tab : numpy.ndarray
+        Holding angle and the modulation index it produces in mode 2.
+    m_limit : float
+        Modulation index at the end of mode 1.
+    """
+    pi3 = np.pi / 3
+    m_linear = np.pi / (2 * np.sqrt(3))
+
+    # Midpoints of the angular intervals of a 60 degree sector
+    n_angles = 4096
+    alpha = (np.arange(n_angles) + 0.5) * pi3 / n_angles
+    vertex = np.exp(1j * pi3)
+    rotation = np.exp(-1j * alpha)
+
+    m_internal_tab = np.linspace(1, 2 / np.sqrt(3), 1201)
+    m_mode1_tab = np.zeros(m_internal_tab.size)
+    for k, m_internal in enumerate(m_internal_tab):
+        d1 = m_internal * np.sin(pi3 - alpha)
+        d2 = m_internal * np.sin(alpha)
+        factor = np.maximum(d1 + d2, 1.0)
+        v_mean = (2 / 3) * (d1 / factor + d2 / factor * vertex)
+        m_mode1_tab[k] = (np.pi / 2) * np.mean(np.real(v_mean * rotation))
+    m_mode1_tab[0] = m_linear
+    m_limit = m_mode1_tab[-1]
+
+    alpha_h_tab = np.linspace(0, np.pi / 6, 1201)
+    m_mode2_tab = np.zeros(alpha_h_tab.size)
+    for k, alpha_h in enumerate(alpha_h_tab):
+        if k == alpha_h_tab.size - 1:
+            alpha_m = np.where(alpha < np.pi / 6, 0.0, pi3)
+        else:
+            alpha_m = np.clip((alpha - alpha_h) * pi3 / (pi3 - 2 * alpha_h), 0, pi3)
+        d1 = (np.sqrt(3) * np.cos(alpha_m) - np.sin(alpha_m)) / (
+            np.sqrt(3) * np.cos(alpha_m) + np.sin(alpha_m)
+        )
+        d1 = np.clip(d1, 0, 1)
+        v_mean = (2 / 3) * (d1 + (1 - d1) * vertex)
+        m_mode2_tab[k] = (np.pi / 2) * np.mean(np.real(v_mean * rotation))
+    m_mode2_tab[0] = m_limit
+    m_mode2_tab[-1] = 1.0
+
+    return m_internal_tab, m_mode1_tab, alpha_h_tab, m_mode2_tab, m_limit
+
+
 class Inverter:
     """Base class for three-phase voltage source inverters using SVPWM.
 
     Provides the shared Space Vector PWM modulator used by
-    :class:`InverterVF` and :class:`InverterFOC`. Subclasses implement
-    speed control and the triangular carrier via `_get_carrier`.
+    :class:`InverterVF` and :class:`InverterFOC`. The duty cycles are computed once
+    per switching period, with the Bose overmodulation above the linear limit, and
+    held until the next period. Subclasses implement the speed control.
 
     Parameters
     ----------
@@ -425,8 +484,132 @@ class Inverter:
         self.V0 = 1
         self.V7 = 8
 
+        self.modulation_index = 0.0
+
+    def initialize_control_state(self, dt, theta_0=0.0):
+        """Initialize the discrete PWM carrier and the held duty cycles.
+
+        The duty cycles are computed at the start of every switching period and
+        held until the next one, while the carrier is compared with them at every
+        simulation step. Must be called before the first time step of a simulation
+        that uses the held duty cycles; without it, the duty cycles are recomputed
+        at every call and the carrier is a function of the time.
+
+        Parameters
+        ----------
+        dt : float
+            Simulation time step [s]. The switching period should be a multiple
+            of it.
+        theta_0 : float, optional
+            Initial flux angle [rad]. Default is 0.
+        """
+        n_samples = max(1, int(round(self.Ts / dt)))
+        if n_samples > 1 and not np.isclose(self.Ts / dt, n_samples, rtol=1e-9):
+            raise ValueError(
+                "The switching period must be a multiple of the time step: "
+                f"Ts / dt = {self.Ts / dt}."
+            )
+        self.control_state = {
+            "carrier_index": 1,
+            "n_samples": n_samples,
+            "reference": np.zeros(3),
+        }
+
+    def _is_period_start(self):
+        """Return True when the next call starts a new switching period."""
+        state = getattr(self, "control_state", None)
+        if state is None:
+            return True
+        return (state["carrier_index"] - 1) % state["n_samples"] == 0
+
+    def _dwell_times(self, va_ref, vb_ref, vc_ref):
+        """Compute the dwell times of the active and zero vectors (Bose method).
+
+        In the linear region the dwell times are the usual ones. In overmodulation
+        mode 1, the internal amplitude is raised to compensate the loss of
+        fundamental and the vector is projected radially onto the hexagon. In
+        mode 2, the angle is remapped and the vector is held at the vertices until
+        the six-step operation.
+
+        Parameters
+        ----------
+        va_ref, vb_ref, vc_ref : float
+            Reference three-phase voltages [V].
+
+        Returns
+        -------
+        sector : int
+            SVPWM sector, from 1 to 6.
+        T1, T2, T0 : float
+            Dwell times of the first and second active vectors and of the zero
+            vectors [s].
+        M : float
+            Modulation index, ``sqrt(3) |v| / V_dc``. The linear limit is 1.
+        """
+        m_internal_tab, m_mode1_tab, alpha_h_tab, m_mode2_tab, m_limit = _bose_tables()
+        pi3 = np.pi / 3
+        Ts = self.Ts
+
+        v_alpha, v_beta = clarke_transform(va_ref, vb_ref, vc_ref)
+
+        vr = np.sqrt(v_alpha**2 + v_beta**2)
+        theta = np.arctan2(v_beta, v_alpha)
+        if theta < 0:
+            theta += 2 * np.pi
+
+        S = int(np.floor(theta / pi3)) + 1
+        S = max(1, min(S, 6))
+        theta_k = theta - (S - 1) * pi3
+
+        M = np.sqrt(3) * vr / self.voltage_dc
+        m = min(np.pi * M / (2 * np.sqrt(3)), 1.0)
+
+        if M <= 1:
+            T1 = Ts * M * np.sin(pi3 - theta_k)
+            T2 = Ts * M * np.sin(theta_k)
+            T0 = max(Ts - T1 - T2, 0.0)
+        elif m < m_limit:
+            M_internal = np.interp(m, m_mode1_tab, m_internal_tab)
+            T1 = Ts * M_internal * np.sin(pi3 - theta_k)
+            T2 = Ts * M_internal * np.sin(theta_k)
+            if T1 + T2 > Ts:
+                factor = Ts / (T1 + T2)
+                T1 *= factor
+                T2 *= factor
+            T0 = max(Ts - T1 - T2, 0.0)
+        elif m < 1:
+            alpha_h = np.interp(m, m_mode2_tab, alpha_h_tab)
+            if theta_k <= alpha_h:
+                theta_m = 0.0
+            elif theta_k >= pi3 - alpha_h:
+                theta_m = pi3
+            else:
+                theta_m = (theta_k - alpha_h) * pi3 / (pi3 - 2 * alpha_h)
+            T1 = (
+                Ts
+                * (np.sqrt(3) * np.cos(theta_m) - np.sin(theta_m))
+                / (np.sqrt(3) * np.cos(theta_m) + np.sin(theta_m))
+            )
+            T1 = np.clip(T1, 0, Ts)
+            T2 = Ts - T1
+            T0 = 0.0
+        else:
+            T1, T2 = (Ts, 0.0) if theta_k < pi3 / 2 else (0.0, Ts)
+            T0 = 0.0
+
+        return S, T1, T2, T0, M
+
     def _svpwm(self, t, va_ref, vb_ref, vc_ref):
         """Synthesize phase voltages via Space Vector PWM modulation.
+
+        At the start of every switching period, the dwell times of the reference
+        are converted into duty cycles, which are held until the next period.
+        At every call, the held duty cycles are compared with a triangular carrier
+        evaluated at the midpoint of the simulation step. The references of the
+        calls that are not at the start of a period are ignored.
+
+        Without a prior call to :py:meth:`initialize_control_state`, the duty cycles
+        are recomputed at every call and the carrier is a function of `t`.
 
         Parameters
         ----------
@@ -440,95 +623,35 @@ class Inverter:
         van, vbn, vcn : float
             Instantaneous phase voltages [V].
         """
-        v_alpha, v_beta = clarke_transform(va_ref, vb_ref, vc_ref)
+        state = getattr(self, "control_state", None)
 
-        # Space vector and SVPWM hexagon sector
-        vr = np.sqrt(v_alpha**2 + v_beta**2)
-        theta = np.arctan2(v_beta, v_alpha)
-        if theta < 0:
-            theta += 2 * np.pi
-
-        S = int(np.floor(theta / (np.pi / 3))) + 1
-        S = max(1, min(S, 6))
-
-        # Angle within the sector
-        theta_k = theta - (S - 1) * np.pi / 3
-
-        # Modulation index and dwell times
-        M = (np.sqrt(3) * vr) / self.voltage_dc
-
-        T1 = self.Ts * M * np.sin(np.pi / 3 - theta_k)
-        T2 = self.Ts * M * np.sin(theta_k)
-        T0 = self.Ts - T1 - T2
-
-        eps = np.finfo(float).eps
-
-        # Correction for overmodulation conditions
-        if M > 0.907 and M <= 1:
-            # Region I (0.907 < M ≤ 1)
-            T0 = max(T0, 0)
-            factor = self.Ts / (T0 + T1 + T2 + eps)
-            T1 *= factor
-            T2 *= factor
-            T0 = self.Ts - T1 - T2
-        elif M > 1 and M <= 1.1547:
-            # Region II (1 < M ≤ 1.1547)
-            T0 = 0
-            factor = self.Ts / (T1 + T2 + eps)
-            T1 *= factor
-            T2 *= factor
-        elif M > 1.1547:
-            # Region III (Six-Step)
-            T0 = 0
-            if theta_k <= (np.pi / 3) / 2:
-                T1, T2 = self.Ts, 0
-            else:
-                T1, T2 = 0, self.Ts
-
-        # Normalization - ensures all values are non-negative
-        T1 = max(T1, 0)
-        T2 = max(T2, 0)
-        T0 = max(T0, 0)
-
-        sumT = T1 + T2 + T0
-
-        if abs(sumT - self.Ts) > 1e-12:
-            if sumT > 0:
-                T1 *= self.Ts / sumT
-                T2 *= self.Ts / sumT
-                T0 = self.Ts - T1 - T2
-            else:
-                # Extreme case: zero vector only
-                T1, T2, T0 = 0, 0, self.Ts
-
-        # Sequence and timing of vector application
-        vetor_seq = (
-            np.array(
-                [self.V0, self.actv_vet[S - 1, 0], self.actv_vet[S - 1, 1], self.V7]
+        if self._is_period_start():
+            S, T1, T2, T0, self.modulation_index = self._dwell_times(
+                va_ref, vb_ref, vc_ref
             )
-            - 1
-        )
 
-        # Switching states
-        S_bits = self.sw_table[:, vetor_seq]
+            vetor_seq = (
+                np.array(
+                    [self.V0, self.actv_vet[S - 1, 0], self.actv_vet[S - 1, 1], self.V7]
+                )
+                - 1
+            )
+            S_bits = self.sw_table[:, vetor_seq]
 
-        # Duty cycles - clamping values within the [0, 1] interval
-        t_seq = np.array([T0 / 2, T1, T2, T0 / 2])
-        D = np.clip((S_bits @ t_seq) / self.Ts, 0, 1)
+            t_seq = np.array([T0 / 2, T1, T2, T0 / 2])
+            D = np.clip((S_bits @ t_seq) / self.Ts, 0, 1)
+            reference = 2 * D - 1
+            if state is not None:
+                state["reference"] = reference
+        else:
+            reference = state["reference"]
 
-        # Carrier synchronized with the switching period
         carrier = self._get_carrier(t)
 
-        # Thresholds derived from duty cycles
-        Ref = 2 * D - 1
+        Ss = (carrier <= reference).astype(float)
 
-        # Comparisons to determine switching states
-        Ss = (carrier <= Ref).astype(float)
-
-        # Pole voltages
         vao, vbo, vco = (2 * Ss - 1) * (self.voltage_dc / 2)
 
-        # Phase voltages
         van = (2 / 3) * vao - (1 / 3) * (vbo + vco)
         vbn = (2 / 3) * vbo - (1 / 3) * (vao + vco)
         vcn = (2 / 3) * vco - (1 / 3) * (vbo + vao)
@@ -536,7 +659,12 @@ class Inverter:
         return van, vbn, vcn
 
     def _get_carrier(self, t):
-        """Return the continuous triangular PWM carrier at time `t`.
+        """Return the triangular PWM carrier.
+
+        With the control state initialized, the carrier is sampled at the midpoint
+        of every simulation step, which avoids repeating its minimum at the
+        boundary between two periods, and advanced by the counter stored in
+        `control_state["carrier_index"]`. Otherwise, it is a function of `t`.
 
         Parameters
         ----------
@@ -548,10 +676,14 @@ class Inverter:
         float
             Carrier value in the [-1, 1] interval.
         """
-        if self.Ts == 0:
-            u = 0
+        state = getattr(self, "control_state", None)
+
+        if state is None:
+            u = 0 if self.Ts == 0 else (t % self.Ts) / self.Ts
         else:
-            u = (t % self.Ts) / self.Ts
+            n_in_period = (state["carrier_index"] - 1) % state["n_samples"]
+            u = (n_in_period + 0.5) / state["n_samples"]
+            state["carrier_index"] += 1
 
         return 1 - 4 * np.abs(u - 0.5)
 
@@ -598,17 +730,17 @@ class InverterVF(Inverter):
     >>> float(np.round(Vp, 2))
     179.63
 
-    >>> van, vbn, vcn = inverter.get_phase_voltages(t=0.001, frequency=freq, theta_0=0.0)
+    >>> van, vbn, vcn = inverter.get_phase_voltages(t=0.001, frequency=freq, theta=0.0)
     >>> np.round([van, vbn, vcn], 2)
     array([ 100., -200.,  100.])
 
     >>> f = inverter.get_frequency(t=0.05, frequency_ref=freq)
     >>> float(np.round(f, 2))
-    18.85
+    31.42
 
     >>> f, van, vbn, vcn = inverter.get_current_state(t=0.5, theta_0=0.0, frequency_ref=freq)
-    >>> np.round([f, van, vbn, vcn], 2)
-    array([188.5,   0. ,   0. ,   0. ])
+    >>> float(np.round(f, 2))
+    0.13
     """
 
     @check_units
@@ -659,11 +791,12 @@ class InverterVF(Inverter):
         Vp = min(Vp, self.voltage_phase_peak_rated)
         return Vp
 
-    def get_phase_voltages(self, t, frequency, theta_0):
+    def get_phase_voltages(self, t, frequency, theta):
         """Generate three-phase voltages using SVPWM modulation.
 
-        Computes the instantaneous phase voltages (A, B, C) using Space Vector
-        PWM modulation based on the reference frequency and switching configuration.
+        Computes the phase voltages (A, B, C) using Space Vector PWM modulation
+        for a reference with the amplitude given by the V/f law and the angle
+        `theta`.
 
         Parameters
         ----------
@@ -671,8 +804,8 @@ class InverterVF(Inverter):
             Current simulation time [s].
         frequency : float
             Operating frequency [rad/s].
-        theta_0 : float
-            Initial flux angle [rad].
+        theta : float
+            Electrical angle of the voltage reference [rad].
 
         Returns
         -------
@@ -683,11 +816,8 @@ class InverterVF(Inverter):
         vcn : float
             Phase C voltage with respect to neutral [V].
         """
-        # Reference peak voltage
         Vp = self.speed_control(frequency)
 
-        # Reference voltages
-        theta = theta_0 + frequency * t
         va_ref = Vp * np.sin(theta)
         vb_ref = Vp * np.sin(theta - 2 * np.pi / 3)
         vc_ref = Vp * np.sin(theta + 2 * np.pi / 3)
@@ -699,9 +829,11 @@ class InverterVF(Inverter):
     def get_frequency(self, t, frequency_ref=None):
         """Calculate the current operating frequency with acceleration ramp.
 
-        Computes the instantaneous frequency accounting for the acceleration ramp,
-        which linearly increases frequency from zero to the reference value over the
-        ramp time.
+        Computes the frequency accounting for the acceleration ramp, which linearly
+        increases the frequency from zero to the reference value over the ramp
+        time. The reference is not limited to the rated frequency, so the inverter
+        can operate in the field-weakening region, where the voltage stays at its
+        rated value.
 
         Parameters
         ----------
@@ -718,22 +850,47 @@ class InverterVF(Inverter):
         if frequency_ref is None:
             frequency_ref = self.frequency_ref
 
-        fref = min(max(frequency_ref, 0), self.frequency_rated)
+        fref = max(frequency_ref, 0)
 
         f_curr = self.f_0 + fref / self.time_ramp * t
         f_curr = min(f_curr, fref)
 
         return f_curr
 
+    def initialize_control_state(self, dt, theta_0=0.0):
+        """Initialize the PWM carrier and the electrical angle of the reference.
+
+        Parameters
+        ----------
+        dt : float
+            Simulation time step [s]. The switching period should be a multiple
+            of it.
+        theta_0 : float, optional
+            Initial flux angle [rad]. The voltage reference starts at the angle
+            ``theta_0 + pi / 2``, which is the initial phase of the network voltage.
+            Default is 0.
+        """
+        super().initialize_control_state(dt, theta_0)
+        self.control_state["theta"] = theta_0 + np.pi / 2
+        self.control_state["frequency"] = 0.0
+        self.control_state["period"] = 0
+
     def get_current_state(self, t, theta_0, frequency_ref=None):
         """Get the fundamental frequency and phase voltages at time `t`.
+
+        At the start of every switching period, the frequency of the ramp is
+        updated at the time of the end of the period, the electrical angle
+        integrates it over the period and the references are sampled. They are held
+        until the next period. When the control state was not initialized, every
+        call is a period.
 
         Parameters
         ----------
         t : float
             Time [s].
         theta_0 : float
-            Initial flux angle [rad].
+            Initial flux angle [rad], used only when the control state was not
+            initialized.
         frequency_ref : float, optional
             Reference frequency [rad/s]. If None, uses `self.frequency_ref`.
 
@@ -748,10 +905,30 @@ class InverterVF(Inverter):
         vcn : float
             Phase C voltage with respect to neutral [V].
         """
-        freq = self.get_frequency(t, frequency_ref)
-        van, vbn, vcn = self.get_phase_voltages(t, freq, theta_0)
+        if getattr(self, "control_state", None) is None:
+            self.initialize_control_state(self.Ts, theta_0)
 
-        return freq, van, vbn, vcn
+        state = self.control_state
+
+        if self._is_period_start():
+            state["period"] += 1
+            state["frequency"] = self.get_frequency(
+                state["period"] * self.Ts, frequency_ref
+            )
+            state["theta"] = (state["theta"] + state["frequency"] * self.Ts) % (
+                2 * np.pi
+            )
+            Vp = self.speed_control(state["frequency"])
+            theta = state["theta"]
+            va_ref = Vp * np.sin(theta)
+            vb_ref = Vp * np.sin(theta - 2 * np.pi / 3)
+            vc_ref = Vp * np.sin(theta + 2 * np.pi / 3)
+        else:
+            va_ref = vb_ref = vc_ref = 0.0
+
+        van, vbn, vcn = self._svpwm(t, va_ref, vb_ref, vc_ref)
+
+        return state["frequency"], van, vbn, vcn
 
 
 class InverterFOC(Inverter):
@@ -804,11 +981,24 @@ class InverterFOC(Inverter):
     frequency_ref : float or pint.Quantity, optional
         Synchronous electrical frequency reference [rad/s]. Default is
         half the rated frequency.
+    ids_ref : float, optional
+        Magnetizing (direct-axis) current reference [A]. Default is None, which
+        uses the value computed from the rated operating point.
 
     Notes
     -----
     Gains for the speed and current PI controllers are computed with the
-    bandwidth method, mirroring the design used for scalar control.
+    bandwidth method, mirroring the design used for scalar control. The
+    direct-axis current controller uses the equivalent leakage inductance
+    ``Lss - Lm**2 / Lrr``. The bandwidth of the current controllers is
+    ``fs / 8``, reduced by 20 % when the speed reference is above the synchronous
+    speed of the rated frequency.
+
+    The speed and current loops run once per switching period and the duty
+    cycles are held until the next one. The speed reference is not limited to the
+    rated speed, and the voltage reference is limited to ``2 V_dc / pi``, the
+    fundamental in six-step operation, with anti-windup of the speed and
+    direct-axis integrators.
 
     References
     ----------
@@ -834,6 +1024,7 @@ class InverterFOC(Inverter):
         Ip_motor,
         time_ramp=1.0,
         frequency_ref=None,
+        ids_ref=None,
     ):
 
         super().__init__(
@@ -878,14 +1069,21 @@ class InverterFOC(Inverter):
         # Modified equivalent circuit voltage Er
         Er = Vpeak - (self.Rs + 1j * self.frequency_rated * Ls1) * Is
         self.ids_ref = abs(Er) / (self.frequency_rated * Lm1)
+        if ids_ref is not None:
+            self.ids_ref = float(ids_ref)
 
         # Rated stator current magnitude
         self.Is_rated = abs(Is)
 
-        # PI controller gains (bandwidth method)
-        BWp_iqs = Q_(frequency_s, "rad/s").to("Hz").m / 8
-        BWp_ids = Q_(frequency_s, "rad/s").to("Hz").m / 8
-        BWi_ids = Q_(frequency_s, "rad/s").to("Hz").m / 8
+        # PI controller gains (bandwidth method). The bandwidth of the current
+        # controllers is reduced above the synchronous speed of the rated frequency
+        BW_current = Q_(frequency_s, "rad/s").to("Hz").m / 8
+        synchronous_speed = self.frequency_rated / self.np_pairs
+        if self.frequency_ref / self.np_pairs > synchronous_speed * (1 + 1e-9):
+            BW_current *= 0.8
+        BWp_iqs = BW_current
+        BWp_ids = BW_current
+        BWi_ids = BW_current
         BWp_w = BWi_ids / 8
         BWi_w = BWp_w / 8
 
@@ -895,8 +1093,8 @@ class InverterFOC(Inverter):
         # Proportional and integral controller gain
         self.kp_w = J * 2 * np.pi * (BWp_w + BWi_w) - KL
         self.ki_w = J * 4 * (np.pi**2) * BWp_w * BWi_w
-        self.kp_ids = self.Lss * 2 * np.pi * (BWp_ids + BWi_ids)
-        self.ki_ids = self.Lss * 4 * (np.pi**2) * BWp_ids * BWi_ids
+        self.kp_ids = Ls1 * 2 * np.pi * (BWp_ids + BWi_ids)
+        self.ki_ids = Ls1 * 4 * (np.pi**2) * BWp_ids * BWi_ids
 
         self.Lsline = (
             self.Lss - (self.Lm**2) / self.Lrr
@@ -914,50 +1112,33 @@ class InverterFOC(Inverter):
         ----------
         dt : float
             Simulation time step [s], used to set the number of samples per
-            switching period.
+            switching period. The switching period should be a multiple of it.
         theta_0 : float, optional
-            Initial flux angle [rad]. Default is 0.
+            Initial flux angle [rad]. The synchronous angle starts at
+            ``theta_0 + pi / 2``. Default is 0.
         """
-        self.control_state = {
-            "int_err_w": 0.0,
-            "int_err_ids": 0.0,
-            "theta": theta_0,
-            "carrier_index": 1,
-            "n_samples": max(1, int(round(self.Ts / dt))),
-        }
-
-    def _get_carrier(self, t):
-        """Return the discrete triangular PWM carrier.
-
-        The carrier is sampled once per simulation step and advanced by
-        the internal counter stored in `control_state["carrier_index"]`. The time
-        argument is unused and kept for interface compatibility with `_svpwm`.
-
-        Parameters
-        ----------
-        t : float
-            Current simulation time [s] (unused).
-
-        Returns
-        -------
-        float
-            Carrier value in the [-1, 1] interval.
-        """
-        state = self.control_state
-        n_in_period = (state["carrier_index"] - 1) % state["n_samples"]
-        u = 0 if state["n_samples"] == 1 else n_in_period / (state["n_samples"] - 1)
-
-        state["carrier_index"] += 1
-
-        return 1 - 4 * np.abs(u - 0.5)
+        super().initialize_control_state(dt, theta_0)
+        self.control_state.update(
+            {
+                "int_err_w": 0.0,
+                "int_err_ids": 0.0,
+                "theta": theta_0 + np.pi / 2,
+                "w_ramp": 0.0,
+                "w_sync": 0.0,
+            }
+        )
 
     def speed_control(self, t, frequency_ref):
         """Compute the mechanical speed reference with acceleration ramp.
 
+        Called once per switching period. The reference changes at the rate that
+        would take the rated speed to be reached in `time_ramp`, until it reaches
+        the reference. It is not limited to the rated speed.
+
         Parameters
         ----------
         t : float
-            Current simulation time [s].
+            Current simulation time [s] (unused, kept for compatibility).
         frequency_ref : float, optional
             Desired synchronous electrical frequency reference [rad/s].
             If None, uses `self.frequency_ref`.
@@ -970,27 +1151,32 @@ class InverterFOC(Inverter):
         if frequency_ref is None:
             frequency_ref = self.frequency_ref
 
-        wref_mech = frequency_ref / self.np_pairs
-        wref = min(max(wref_mech, 0), self.speed_rated)
+        wref = max(frequency_ref / self.np_pairs, 0)
 
-        w_ramp = wref / self.time_ramp * t
-        w_ramp = min(w_ramp, wref)
+        state = self.control_state
+        dw_max = self.speed_rated * self.Ts / self.time_ramp
 
-        return w_ramp
+        if state["w_ramp"] < wref:
+            state["w_ramp"] = min(state["w_ramp"] + dw_max, wref)
+        elif state["w_ramp"] > wref:
+            state["w_ramp"] = max(state["w_ramp"] - dw_max, wref)
+
+        return state["w_ramp"]
 
     def get_current_state(self, t, dt, rotor_speed, ia, ib, ic, frequency_ref=None):
         """Run the iFOC control loop and synthesize phase voltages via SVPWM.
 
-        Computes the instantaneous phase voltages (A, B, C) from the rotor
-        speed and stator current feedback, using indirect Field-Oriented
-        Control followed by Space Vector PWM modulation.
+        At the start of every switching period, the speed and current loops
+        sample the rotor speed and the stator currents and update the voltage
+        reference, the synchronous angle and the duty cycles, which are held
+        until the next period. The phase voltages are synthesized at every call.
 
         Parameters
         ----------
         t : float
             Current simulation time [s].
         dt : float
-            Time step [s].
+            Time step [s] (unused, the loops integrate over the switching period).
         rotor_speed : float
             Measured (feedback) rotor mechanical speed [rad/s].
         ia, ib, ic : float
@@ -1012,24 +1198,28 @@ class InverterFOC(Inverter):
         """
         state = self.control_state
 
+        if not self._is_period_start():
+            van, vbn, vcn = self._svpwm(t, 0.0, 0.0, 0.0)
+            return state["w_sync"], van, vbn, vcn
+
+        dt_control = self.Ts
+
         wref = self.speed_control(t, frequency_ref)
         err_w = wref - rotor_speed
 
         u_prop = self.kp_w * err_w
         u_int = self.ki_w * state["int_err_w"]
         iqs_ref_unsat = u_prop + u_int
-
-        # Torque-producing (q-axis) current limit
-        iqs_max = 3.0 * self.Is_rated
-        iqs_ref = np.clip(iqs_ref_unsat, -iqs_max, iqs_max)
+        iqs_ref = iqs_ref_unsat
 
         # Slip frequency
         wsl = (1 / self.taur) * (iqs_ref / self.ids_ref)
 
         # Synchronous electrical speed
         w_sync = wsl + self.np_pairs * rotor_speed
+        state["w_sync"] = w_sync
 
-        state["theta"] += w_sync * dt
+        state["theta"] += w_sync * dt_control
 
         # q aligned with cosine (torque), d aligned with sine (flux), matching the iFOC
         # convention: d_std = iqs, q_std = -ids
@@ -1042,7 +1232,7 @@ class InverterFOC(Inverter):
         vqs_ref = self.kp_iqs * err_iqs + self.Rs * iqs + self.Lss * w_sync * ids
 
         err_ids = self.ids_ref - ids
-        state["int_err_ids"] += err_ids * dt
+        state["int_err_ids"] += err_ids * dt_control
 
         vds_ref = (
             self.kp_ids * err_ids
@@ -1051,8 +1241,10 @@ class InverterFOC(Inverter):
             - self.Lsline * w_sync * iqs
         )
 
-        # Saturation & anti-windup
-        Vmax = self.voltage_dc / np.sqrt(3)
+        # The reference may exceed the linear limit V_dc / sqrt(3). Its magnitude
+        # is limited to the fundamental in six-step operation, 2 V_dc / pi
+        Vmax = 2 * self.voltage_dc / np.pi
+        vds_unsat = vds_ref
         Vref = np.sqrt(vqs_ref**2 + vds_ref**2)
 
         saturated = Vref > Vmax
@@ -1062,18 +1254,14 @@ class InverterFOC(Inverter):
             vqs_ref *= scale
             vds_ref *= scale
 
-        # Anti-windup: freeze the speed-loop integrator whenever either the
-        # current limit or the voltage limit is actively clipping the output
-        # in the same direction as the error (otherwise the integral term
-        # would keep growing without any corresponding effect on the actual
-        # torque/voltage applied to the motor).
-        current_saturated = abs(iqs_ref_unsat) > iqs_max
+            # Anti-windup of the d-axis integrator: undo the last increment when it
+            # increases the voltage demand beyond what the inverter supplies
+            if err_ids * (vds_unsat - vds_ref) > 0:
+                state["int_err_ids"] -= err_ids * dt_control
 
-        any_saturated = saturated or current_saturated
-        if (not any_saturated) or (np.sign(err_w) != np.sign(iqs_ref_unsat)):
-            state["int_err_w"] += err_w * dt
-
-        iqs_ref = self.kp_w * err_w + self.ki_w * state["int_err_w"]
+        # Anti-windup of the speed integrator
+        if (not saturated) or (np.sign(err_w) != np.sign(iqs_ref_unsat)):
+            state["int_err_w"] += err_w * dt_control
 
         v_alpha, v_beta = park_transform(vqs_ref, -vds_ref, -state["theta"])
         va_ref, vb_ref, vc_ref = inverse_clarke_transform(v_alpha, v_beta)

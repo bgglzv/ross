@@ -429,14 +429,15 @@ def results_foc_rated_speed_with_load(motor):
 def test_foc_speed_tracks_rated_reference_despite_load(
     results_foc_rated_speed_with_load, motor
 ):
-    """Steady-state speed must track the rated speed closely, even
-    after the rated load torque is applied - contrasting the V/f speed
-    droop."""
+    """Steady-state speed must track the reference closely, even after the
+    rated load torque is applied - contrasting the V/f speed droop. The speed
+    reference is not limited to the rated speed: a 60 Hz reference is the
+    synchronous speed of the 4-pole motor, 1800 RPM."""
     ss = _steady_state_slice(results_foc_rated_speed_with_load)
     speed_rpm = (
         np.mean(results_foc_rated_speed_with_load.speed[ss:]) * 60.0 / (2.0 * np.pi)
     )
-    wref_rpm = motor.speed_rated * 60.0 / (2.0 * np.pi)
+    wref_rpm = _synchronous_speed_rpm(motor, 60.0)
 
     assert_allclose(
         speed_rpm,
@@ -603,19 +604,25 @@ def results_run_with_motor(rotor_with_motor, request):
     )
 
 
-def test_run_with_motor(results_run_with_motor, rotor_with_motor):
-    """Each drive_mode must attach motor results, settle near the rated speed
-    under rated load, and produce a synchronous (1X) unbalance response."""
+def test_run_with_motor(results_run_with_motor, rotor_with_motor, request):
+    """Each drive_mode must attach motor results, settle near the expected speed
+    under rated load, and produce a synchronous (1X) unbalance response. The
+    open-loop sources settle at the rated speed, with the slip; the FOC speed
+    loop holds the synchronous speed of the 60 Hz reference, which is not
+    limited to the rated speed."""
     results = results_run_with_motor
     assert isinstance(results.motor_results, MotorResponseResults)
+
+    drive_mode = request.node.callspec.params["results_run_with_motor"]
+    expected_rpm = 1800.0 if drive_mode == "VFD_FOC" else 1710.0
 
     speed = results.motor_results.sample_at("speed", results.t)
     speed_rpm = np.mean(speed) * 60.0 / (2.0 * np.pi)
     assert_allclose(
         speed_rpm,
-        1710.0,
+        expected_rpm,
         atol=15.0,
-        err_msg="Shaft speed under rated load should be close to the rated speed",
+        err_msg="Shaft speed under rated load should be close to the expected speed",
     )
 
     dof_x = rotor_with_motor.number_dof * _ROTOR_UNBALANCE_NODE

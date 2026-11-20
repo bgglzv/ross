@@ -5182,6 +5182,7 @@ class Rotor(object):
         time_step=None,
         time_ramp=0.6667,
         frequency_ref=None,
+        ids_ref=None,
         steady_state=True,
         F=None,
         verbose=False,
@@ -5260,6 +5261,10 @@ class Rotor(object):
             reference when `drive_mode='VFD_FOC'`.
             Active only when `drive_mode` is ``'VFD_VF'`` or ``'VFD_FOC'``.
             Default is None, which uses half the motor rated frequency.
+        ids_ref : float, optional
+            Magnetizing (direct-axis) current reference [A], used only when
+            `drive_mode` is ``'VFD_FOC'``. Default is None, which uses the value
+            computed from the rated operating point.
         steady_state : bool, optional
             If True (default), only the last third of the interval after
             `load_torque_entrance_time` is integrated, skipping the motor
@@ -5353,6 +5358,7 @@ class Rotor(object):
                 time_step=time_step,
                 time_ramp=time_ramp,
                 frequency_ref=frequency_ref,
+                ids_ref=ids_ref,
             )
         else:
             raise ValueError("drive_mode must be 'DOL', 'VFD_VF' or 'VFD_FOC'.")
