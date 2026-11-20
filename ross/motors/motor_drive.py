@@ -866,12 +866,11 @@ class InverterVF(Inverter):
             Simulation time step [s]. The switching period should be a multiple
             of it.
         theta_0 : float, optional
-            Initial flux angle [rad]. The voltage reference starts at the angle
-            ``theta_0 + pi / 2``, which is the initial phase of the network voltage.
-            Default is 0.
+            Initial flux angle [rad], unused: the voltage reference starts at the
+            angle zero. Default is 0.
         """
         super().initialize_control_state(dt, theta_0)
-        self.control_state["theta"] = theta_0 + np.pi / 2
+        self.control_state["theta"] = 0.0
         self.control_state["frequency"] = 0.0
         self.control_state["period"] = 0
 
@@ -1114,15 +1113,15 @@ class InverterFOC(Inverter):
             Simulation time step [s], used to set the number of samples per
             switching period. The switching period should be a multiple of it.
         theta_0 : float, optional
-            Initial flux angle [rad]. The synchronous angle starts at
-            ``theta_0 + pi / 2``. Default is 0.
+            Initial flux angle [rad], unused: the synchronous angle starts at zero.
+            Default is 0.
         """
         super().initialize_control_state(dt, theta_0)
         self.control_state.update(
             {
                 "int_err_w": 0.0,
                 "int_err_ids": 0.0,
-                "theta": theta_0 + np.pi / 2,
+                "theta": 0.0,
                 "w_ramp": 0.0,
                 "w_sync": 0.0,
             }
