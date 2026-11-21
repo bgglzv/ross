@@ -1,0 +1,199 @@
+{
+ "metricas": {
+  "standalone_VF": {
+   "t_95_velocidade_s": 0.6815840005874634,
+   "f1_hz": 60.0,
+   "I1_pico_A": 6.186891667629367,
+   "I_rms_A": 4.392864387833794,
+   "THD_corrente_pct": 7.463385615890984,
+   "THD_tensao_fase_pct": 4.044227609099775,
+   "velocidade_final_rpm": 1704.915771484375,
+   "velocidade_antes_carga_rpm": 1797.525390625,
+   "torque_medio_Nm": 6.159999896591186,
+   "ripple_torque_rms_pct": 9.495085806878595,
+   "torque_vazio_min_Nm": -0.6795946362540126,
+   "torque_vazio_max_Nm": 1.3344593776464462,
+   "pico_corrente_partida_A": 14.941752433776855,
+   "queda_velocidade_apos_carga_rpm": -92.797119140625
+  },
+  "jg_VF": {
+   "t_95_velocidade_s": 0.8793339729309082,
+   "f1_hz": 59.99988000024,
+   "I1_pico_A": 6.200545197528624,
+   "I_rms_A": 4.4054647384414665,
+   "THD_corrente_pct": 8.01437285063864,
+   "THD_tensao_fase_pct": 4.373635228412703,
+   "velocidade_final_rpm": 1704.16357421875,
+   "velocidade_antes_carga_rpm": 1692.9736328125,
+   "torque_medio_Nm": 6.1614348387409255,
+   "ripple_torque_rms_pct": 10.010353814226898,
+   "torque_vazio_min_Nm": 1.132080595254898,
+   "torque_vazio_max_Nm": 13.739682271957397,
+   "pico_corrente_partida_A": 33.27305221557617,
+   "queda_velocidade_apos_carga_rpm": 10.5621337890625
+  },
+  "bose_VF": {
+   "t_95_velocidade_s": 0.681797981262207,
+   "f1_hz": 59.99988000024,
+   "I1_pico_A": 6.197662930457466,
+   "I_rms_A": 4.400101981849519,
+   "THD_corrente_pct": 7.370112505803145,
+   "THD_tensao_fase_pct": 3.9946706780368797,
+   "velocidade_final_rpm": 1704.7655029296875,
+   "velocidade_antes_carga_rpm": 1797.49755859375,
+   "torque_medio_Nm": 6.1600011666662535,
+   "ripple_torque_rms_pct": 9.203939587268255,
+   "torque_vazio_min_Nm": -0.6539517548829317,
+   "torque_vazio_max_Nm": 1.3239957916736602,
+   "pico_corrente_partida_A": 14.833550453186035,
+   "queda_velocidade_apos_carga_rpm": -92.85595703125
+  },
+  "ari_VF": {
+   "t_95_velocidade_s": 0.6815840005874634,
+   "f1_hz": 59.99988000024,
+   "I1_pico_A": 6.1868916102502824,
+   "I_rms_A": 4.392863048009715,
+   "THD_corrente_pct": 7.4633832516251815,
+   "THD_tensao_fase_pct": 4.044225657207995,
+   "velocidade_final_rpm": 1704.9156494140625,
+   "velocidade_antes_carga_rpm": 1797.525390625,
+   "torque_medio_Nm": 6.1599991724142225,
+   "ripple_torque_rms_pct": 9.495081066954661,
+   "torque_vazio_min_Nm": -0.6795946362540126,
+   "torque_vazio_max_Nm": 1.3344593776464462,
+   "pico_corrente_partida_A": 14.941752433776855,
+   "queda_velocidade_apos_carga_rpm": -92.797119140625
+  },
+  "standalone_FOC": {
+   "t_95_velocidade_s": 0.6668019890785217,
+   "f1_hz": 64.4,
+   "I1_pico_A": 6.610135962863961,
+   "I_rms_A": 4.677458584458247,
+   "THD_corrente_pct": 0.29460008120335407,
+   "THD_tensao_fase_pct": 0.3769251905192573,
+   "velocidade_final_rpm": 1799.99951171875,
+   "velocidade_antes_carga_rpm": 1800.0059814453125,
+   "torque_medio_Nm": 6.15993386233139,
+   "ripple_torque_rms_pct": 1.8987845143506794,
+   "torque_vazio_min_Nm": -0.07381968937998681,
+   "torque_vazio_max_Nm": 0.07848882758966647,
+   "pico_corrente_partida_A": 37.68577575683594,
+   "queda_velocidade_apos_carga_rpm": -2.3621826171875
+  },
+  "jg_FOC": {
+   "t_95_velocidade_s": 0.6334440112113953,
+   "f1_hz": 63.749872500255,
+   "I1_pico_A": 8.020987695087422,
+   "I_rms_A": 6.176574476935128,
+   "THD_corrente_pct": 2.056644483006979,
+   "THD_tensao_fase_pct": 1.9500378424986267,
+   "velocidade_final_rpm": 1707.59912109375,
+   "velocidade_antes_carga_rpm": 1689.9107666015625,
+   "torque_medio_Nm": 6.186828778362421,
+   "ripple_torque_rms_pct": 25.078784753921408,
+   "torque_vazio_min_Nm": -16.280720993041992,
+   "torque_vazio_max_Nm": 12.331649265289307,
+   "pico_corrente_partida_A": 26.000850677490234,
+   "queda_velocidade_apos_carga_rpm": -136.8963623046875
+  },
+  "bose_FOC": {
+   "t_95_velocidade_s": 0.634332001209259,
+   "f1_hz": 64.3498713002574,
+   "I1_pico_A": 6.644835219114407,
+   "I_rms_A": 4.787247391226786,
+   "THD_corrente_pct": 3.3540532278826882,
+   "THD_tensao_fase_pct": 2.4426671359243572,
+   "velocidade_final_rpm": 1799.07177734375,
+   "velocidade_antes_carga_rpm": 1800.0093994140625,
+   "torque_medio_Nm": 6.1593541936359735,
+   "ripple_torque_rms_pct": 13.385727793569313,
+   "torque_vazio_min_Nm": -0.21355835378402843,
+   "torque_vazio_max_Nm": 0.2650755201999564,
+   "pico_corrente_partida_A": 19.308103561401367,
+   "queda_velocidade_apos_carga_rpm": -12.3419189453125
+  },
+  "ari_FOC": {
+   "t_95_velocidade_s": 0.6668019890785217,
+   "f1_hz": 64.3998712002576,
+   "I1_pico_A": 6.610446219146449,
+   "I_rms_A": 4.67795771473695,
+   "THD_corrente_pct": 0.3097764462298344,
+   "THD_tensao_fase_pct": 0.4338234152826937,
+   "velocidade_final_rpm": 1799.99951171875,
+   "velocidade_antes_carga_rpm": 1800.0062255859375,
+   "torque_medio_Nm": 6.16002038692658,
+   "ripple_torque_rms_pct": 1.9089454706036635,
+   "torque_vazio_min_Nm": -0.07445863425564311,
+   "torque_vazio_max_Nm": 0.07766166630992666,
+   "pico_corrente_partida_A": 37.99748611450195,
+   "queda_velocidade_apos_carga_rpm": -2.3489990234375
+  },
+  "ari_def_FOC": {
+   "t_95_velocidade_s": 0.6668339967727661,
+   "f1_hz": 64.66987066025868,
+   "I1_pico_A": 6.797801119326003,
+   "I_rms_A": 5.1261426371953265,
+   "THD_corrente_pct": 3.6954268005398703,
+   "THD_tensao_fase_pct": 5.083788498026258,
+   "velocidade_final_rpm": 1798.9189453125,
+   "velocidade_antes_carga_rpm": 1800.0029296875,
+   "torque_medio_Nm": 6.181673066783872,
+   "ripple_torque_rms_pct": 20.058663099786976,
+   "torque_vazio_min_Nm": -0.09887544283584566,
+   "torque_vazio_max_Nm": 0.1012829792102275,
+   "pico_corrente_partida_A": 37.14077377319336,
+   "queda_velocidade_apos_carga_rpm": -8.2913818359375
+  },
+  "ari_rsc_FOC": {
+   "t_95_velocidade_s": 0.6670380234718323,
+   "f1_hz": 64.3998712002576,
+   "I1_pico_A": 6.610381254671764,
+   "I_rms_A": 4.678094166042684,
+   "THD_corrente_pct": 0.3168305157722672,
+   "THD_tensao_fase_pct": 0.4716855715872162,
+   "velocidade_final_rpm": 1799.99951171875,
+   "velocidade_antes_carga_rpm": 1799.9996337890625,
+   "torque_medio_Nm": 6.160025735367498,
+   "ripple_torque_rms_pct": 1.9143306976594106,
+   "torque_vazio_min_Nm": -0.0755271100050195,
+   "torque_vazio_max_Nm": 0.08671063573331048,
+   "pico_corrente_partida_A": 37.68577575683594,
+   "queda_velocidade_apos_carga_rpm": -2.345458984375
+  }
+ },
+ "port_vs_standalone": {
+  "VF": {
+   "amostras_iniciais_coincidentes": 1500000,
+   "velocidade_rpm": {
+    "max_abs": 6.283307343391345e-16,
+    "rms": 1.851871910668648e-17
+   },
+   "torque_Nm": {
+    "max_abs": 5.960465454535324e-11,
+    "rms": 1.0882276470214809e-12
+   }
+  },
+  "FOC (Rsc do ROSS)": {
+   "amostras_iniciais_coincidentes": 17,
+   "velocidade_rpm": {
+    "max_abs": 1.7079270019530668,
+    "rms": 0.08896491089827252
+   },
+   "torque_Nm": {
+    "max_abs": 4.197436946868897,
+    "rms": 0.18015429050475487
+   }
+  },
+  "FOC (Rsc igualado)": {
+   "amostras_iniciais_coincidentes": 72718,
+   "velocidade_rpm": {
+    "max_abs": 1.728414550781281,
+    "rms": 0.12423655585579012
+   },
+   "torque_Nm": {
+    "max_abs": 3.57979972076416,
+    "rms": 0.18641383837634853
+   }
+  }
+ }
+}
