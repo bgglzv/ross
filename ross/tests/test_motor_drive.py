@@ -22,7 +22,7 @@ from ross.motors.motor_drive import InverterFOC, InverterVF
 from ross.motors.motor_element import motor_example
 from ross.units import Q_
 
-VDC = 296.96
+VDC = 311.09
 FS = Q_(5000, "Hz")
 TS = 1 / 5000
 
@@ -242,6 +242,23 @@ def test_foc_magnetizing_current_is_an_input():
     assert make_foc(ids_ref=3.2).ids_ref == 3.2
     default = make_foc()
     assert default.ids_ref != 3.2 and default.ids_ref > 0
+
+
+def test_foc_q_axis_current_is_limited_to_three_times_rated_current():
+    """Start-up current limit, ported from ``feature-motor``/``feature-motor-
+    bose``: the q-axis (torque-producing) current reference is clipped to
+    3x the rated stator current magnitude, bounding the inrush current and
+    the electromagnetic torque during start-up and large speed transients."""
+    inverter = make_foc(frequency_ref=hz(60), time_ramp=0.1)
+    inverter.initialize_control_state(dt=TS)
+    iqs_max = 3.0 * inverter.Is_rated
+    rotor_speed = 0.0
+    for k in range(2000):
+        w_sync, *_ = inverter.get_current_state(k * TS, TS, rotor_speed, 0.0, 0.0, 0.0)
+        wsl = w_sync - inverter.np_pairs * rotor_speed
+        iqs_ref = wsl * inverter.taur * inverter.ids_ref
+        assert abs(iqs_ref) <= iqs_max * (1 + 1e-9)
+    assert abs(iqs_ref) >= iqs_max * (1 - 1e-6)
 
 
 def test_foc_voltage_reference_is_limited_to_the_six_step_fundamental():

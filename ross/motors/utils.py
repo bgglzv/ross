@@ -32,8 +32,9 @@ def phase_to_line(v_phase):
 def line_to_dc_bus(v_line):
     """Convert line-to-line voltage to DC bus voltage.
 
-    For a three-phase rectifier, the DC bus voltage is related to the
-    line-to-line voltage by a factor of :math:`1.35`.
+    For a three-phase diode rectifier with a DC-link filter capacitor, the
+    bus voltage settles at the peak of the line-to-line voltage,
+    :math:`\\sqrt{2} \\, V_{line}`.
 
     Parameters
     ----------
@@ -48,9 +49,9 @@ def line_to_dc_bus(v_line):
     Examples
     --------
     >>> line_to_dc_bus(219.9)  # doctest: +ELLIPSIS
-    296.8...
+    310.98...
     """
-    return v_line * 1.35
+    return v_line * np.sqrt(2)
 
 
 @njit

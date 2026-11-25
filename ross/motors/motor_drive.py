@@ -999,6 +999,12 @@ class InverterFOC(Inverter):
     fundamental in six-step operation, with anti-windup of the speed and
     direct-axis integrators.
 
+    The q-axis (torque-producing) current reference is limited to 3 times the
+    rated stator current magnitude, bounding the electrical and mechanical
+    stress during start-up and large speed transients. The speed-loop
+    integrator is frozen whenever either the voltage or the current limit is
+    active and freezing would increase the saturation.
+
     References
     ----------
     Wu, B. & Narimani, M. (2016). High-Power Converters and AC Drives. Wiley.
@@ -1169,6 +1175,8 @@ class InverterFOC(Inverter):
         sample the rotor speed and the stator currents and update the voltage
         reference, the synchronous angle and the duty cycles, which are held
         until the next period. The phase voltages are synthesized at every call.
+        The q-axis current reference is limited to 3 times the rated stator
+        current magnitude.
 
         Parameters
         ----------
@@ -1209,7 +1217,10 @@ class InverterFOC(Inverter):
         u_prop = self.kp_w * err_w
         u_int = self.ki_w * state["int_err_w"]
         iqs_ref_unsat = u_prop + u_int
-        iqs_ref = iqs_ref_unsat
+
+        # Torque-producing (q-axis) current limit, bounding the start-up inrush
+        iqs_max = 3.0 * self.Is_rated
+        iqs_ref = np.clip(iqs_ref_unsat, -iqs_max, iqs_max)
 
         # Slip frequency
         wsl = (1 / self.taur) * (iqs_ref / self.ids_ref)
@@ -1258,8 +1269,11 @@ class InverterFOC(Inverter):
             if err_ids * (vds_unsat - vds_ref) > 0:
                 state["int_err_ids"] -= err_ids * dt_control
 
-        # Anti-windup of the speed integrator
-        if (not saturated) or (np.sign(err_w) != np.sign(iqs_ref_unsat)):
+        # Anti-windup of the speed integrator: freeze it whenever either the
+        # voltage or the current limit is actively clipping the output
+        current_saturated = abs(iqs_ref_unsat) > iqs_max
+        any_saturated = saturated or current_saturated
+        if (not any_saturated) or (np.sign(err_w) != np.sign(iqs_ref_unsat)):
             state["int_err_w"] += err_w * dt_control
 
         v_alpha, v_beta = park_transform(vqs_ref, -vds_ref, -state["theta"])
